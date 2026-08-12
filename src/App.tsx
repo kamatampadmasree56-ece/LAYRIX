@@ -1,11 +1,12 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import './App.css'
 import CMOSInverterLab from './components/CMOSInverterLab'
 import CourseProgress from './components/CourseProgress'
 import DigitalLogicLab from './components/DigitalLogicLab'
 import PhysicalDesignFlow from './components/PhysicalDesignFlow'
 import RTLVerilogLab from './components/RTLVerilogLab'
-import SynthesisLab, type { SynthesisMetrics } from './components/SynthesisLab'
+import SynthesisLab from './components/SynthesisLab'
+import type { SynthesisMetrics } from './components/SynthesisLab'
 import VideoLesson from './components/VideoLesson'
 import VLSIMathLab from './components/VLSIMathLab'
 
@@ -213,7 +214,7 @@ const videoLessons = [
 ]
 
 function App() {
-  const [synthMetrics, setSynthMetrics] = useState<SynthesisMetrics | null>(null)
+  const [, setSynthMetrics] = useState<SynthesisMetrics | null>(null)
 
   return (
     <div className="app-shell">
@@ -379,6 +380,7 @@ function App() {
         <PhysicalDesignFlow />
         <VLSIMathLab />
         <RTLVerilogLab />
+        <SynthesisLab onSynthesisChange={setSynthMetrics} />
 
         <section className="section flow-section" id="projects">
           <div className="section-heading">

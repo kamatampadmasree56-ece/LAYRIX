@@ -130,11 +130,6 @@ endmodule`,
 
 const stages = ['RTL', 'Parse', 'Elaborate', 'Optimize', 'Technology Map', 'Gate Netlist'] as const
 
-type SynthesisStage = (typeof stages)[number]
-
-function formatMetric(value: number, unit: string) {
-  return `${value.toFixed(2)} ${unit}`
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -148,8 +143,8 @@ function SynthesisLab({ onSynthesisChange }: Props) {
   const [baseMetrics, setBaseMetrics] = useState<SynthesisMetrics | null>(null)
   const [currentMetrics, setCurrentMetrics] = useState<SynthesisMetrics | null>(null)
   const [optimizationMode, setOptimizationMode] = useState<OptimizationMode>('AREA')
-  const [designState, setDesignState] = useState<'BASELINE' | 'BAD' | 'OPTIMIZED'>('BASELINE')
-  const [warningList, setWarningList] = useState<string[]>([])
+  const [, setDesignState] = useState<'BASELINE' | 'BAD' | 'OPTIMIZED'>('BASELINE')
+  const [, setWarningList] = useState<string[]>([])
   const [engineerChoice, setEngineerChoice] = useState<string | null>(null)
   const [engineerResult, setEngineerResult] = useState<string>('Choose an answer to reveal the engineer mindset.')
 
@@ -203,14 +198,6 @@ function SynthesisLab({ onSynthesisChange }: Props) {
     }
   }, [currentMetrics, onSynthesisChange])
 
-  useEffect(() => {
-    if (engineerChoice === null) return
-    if (engineerChoice === 'C') {
-      setEngineerResult('Correct. Timing optimization often increases area and power.')
-    } else {
-      setEngineerResult('Not quite. Timing optimization usually impacts area, power, or both.')
-    }
-  }, [engineerChoice])
 
   const runSynthesis = () => {
     setIsSynthesizing(true)
@@ -485,7 +472,14 @@ function SynthesisLab({ onSynthesisChange }: Props) {
                   key={option.value}
                   type="button"
                   className={`button secondary small ${engineerChoice === option.value ? 'active' : ''}`}
-                  onClick={() => setEngineerChoice(option.value)}
+                  onClick={() => {
+                    setEngineerChoice(option.value)
+                    setEngineerResult(
+                      option.value === 'C'
+                        ? 'Correct. Timing optimization often increases area and power.'
+                        : 'Not quite. Timing optimization usually impacts area, power, or both.',
+                    )
+                  }}
                 >
                   {option.label}
                 </button>
