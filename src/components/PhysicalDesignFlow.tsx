@@ -1,672 +1,271 @@
-import { useMemo, useState, type PointerEvent } from 'react'
-import PlacementLab from './PlacementLab'
-import RoutingLab from './RoutingLab'
-import ClockTreeLab from './ClockTreeLab'
-import TimingLab from './TimingLab'
-import PowerLab from './PowerLab'
-import PhysicalVerificationLab from './PhysicalVerificationLab'
+import { useMemo, useState } from 'react'
+import { LabHeader, type Mode } from './labs/LabHeader'
+import { MetricCard } from './labs/MetricCard'
+import { EquationBreakdown } from './labs/EquationBreakdown'
+import { ChallengeCard, type Challenge } from './labs/ChallengeCard'
 
 type StageId =
+  | 'Specification'
+  | 'Architecture'
   | 'RTL'
+  | 'Simulation'
   | 'Synthesis'
-  | 'Netlist'
   | 'Floorplanning'
+  | 'Power Planning'
   | 'Placement'
-  | 'Clock Tree Synthesis'
+  | 'CTS'
   | 'Routing'
+  | 'Parasitic Extraction'
+  | 'STA'
   | 'Physical Verification'
+  | 'Signoff'
   | 'GDSII'
+  | 'Tapeout'
 
-type StageDefinition = {
+type RunStatus = 'NOT_STARTED' | 'RUNNING' | 'PASSED' | 'FAILED'
+
+type StageDef = {
   id: StageId
+  num: number
   title: string
-  what: string
-  why: string
   input: string
+  process: string
   output: string
-  realWorld: string
-  learning: string
-  challengeQuestion: string
-  challengeOptions: string[]
-  challengeAnswer: string
+  keyMetrics: string[]
+  commonProblems: string[]
+  engineeringObjective: string
+  tools: string[]
+  nextStage: string
+  howToFixFailure: string
 }
 
-const stages: StageDefinition[] = [
+const flowStages: StageDef[] = [
+  { id: 'Specification', num: 1, title: 'Specification', input: 'Market & product requirements', process: 'Define target frequency, power budget, features, and area limits', output: 'System Spec Document', keyMetrics: ['Frequency (GHz)', 'Power (W)', 'Die Area (mm²)'], commonProblems: ['Unrealistic power budget'], engineeringObjective: 'Establish unambiguous product parameters', tools: ['DOORS', 'Python'], nextStage: 'Architecture', howToFixFailure: 'Re-align features with power/area budgets.' },
+  { id: 'Architecture', num: 2, title: 'Architecture', input: 'System Spec Document', process: 'Design system block hierarchy, instruction set, cache sizes', output: 'High-level C++/SystemC model', keyMetrics: ['IPC', 'Bus Bandwidth'], commonProblems: ['Bus contention bottlenecks'], engineeringObjective: 'Verify microarchitectural performance', tools: ['SystemC', 'Gem5'], nextStage: 'RTL', howToFixFailure: 'Increase bus width or cache size.' },
+  { id: 'RTL', num: 3, title: 'RTL', input: 'Architecture Specification', process: 'Write synthesizable Verilog/SystemVerilog hardware modules', output: 'Synthesizable RTL code (.v)', keyMetrics: ['Code Lines', 'Module Count'], commonProblems: ['Unintentional latches', 'Syntax errors'], engineeringObjective: 'Express hardware behavior in text', tools: ['VS Code', 'SpyGlass Lint'], nextStage: 'Simulation', howToFixFailure: 'Add default assignments in always_comb.' },
+  { id: 'Simulation', num: 4, title: 'Simulation', input: 'RTL + Testbench', process: 'Run functional testbenches and verify logic correctness', output: 'Simulation Waveforms & 100% Coverage', keyMetrics: ['Code Coverage %', 'Functional Pass %'], commonProblems: ['Corner-case bugs', 'Deadlocks'], engineeringObjective: 'Achieve 100% verification coverage', tools: ['Synopsys VCS', 'ModelSim'], nextStage: 'Synthesis', howToFixFailure: 'Debug wave in Verdi, fix RTL bug.' },
+  { id: 'Synthesis', num: 5, title: 'Synthesis', input: 'Verified RTL + Technology Library (.lib) + SDC', process: 'Translate RTL to gate netlist and optimize logic', output: 'Gate-level netlist (.v)', keyMetrics: ['Gate Count', 'Area (μm²)', 'Pre-route WNS'], commonProblems: ['Unrealistic SDC constraints', 'Negative slack'], engineeringObjective: 'Map behavioral code to real silicon gates', tools: ['Design Compiler', 'Genus'], nextStage: 'Floorplanning', howToFixFailure: 'Pipeline long paths in RTL or relax SDC.' },
+  { id: 'Floorplanning', num: 6, title: 'Floorplanning', input: 'Gate-level Netlist + Tech LEF', process: 'Set die size, core margins, and place memory macros/IOs', output: 'Floorplan DEF file', keyMetrics: ['Utilization %', 'Aspect Ratio'], commonProblems: ['Macro overlap', 'Congestion spots'], engineeringObjective: 'Establish physical spatial organization', tools: ['Innovus', 'ICC2'], nextStage: 'Power Planning', howToFixFailure: 'Move macros to edges and reduce core utilization.' },
+  { id: 'Power Planning', num: 7, title: 'Power Planning', input: 'Floorplan DEF', process: 'Create VDD/VSS power rings, stripes, and row rails', output: 'Power Mesh Net', keyMetrics: ['IR Drop (mV)', 'Power Mesh Resistance'], commonProblems: ['High IR drop (>5% VDD)'], engineeringObjective: 'Distribute clean power everywhere', tools: ['Innovus', 'RedHawk'], nextStage: 'Placement', howToFixFailure: 'Widen stripes and add more vertical power straps.' },
+  { id: 'Placement', num: 8, title: 'Placement', input: 'Floorplan DEF + Netlist', process: 'Global placement → Legalization → Detailed timing-driven placement', output: 'Placed DEF file', keyMetrics: ['HPWL (mm)', 'Local Cell Density %'], commonProblems: ['Routing congestion', 'Cell overlap'], engineeringObjective: 'Position cells to minimize wirelength and delay', tools: ['Innovus', 'ICC2'], nextStage: 'CTS', howToFixFailure: 'Use placement blockages to spread dense regions.' },
+  { id: 'CTS', num: 9, title: 'CTS', input: 'Placed DEF + CTS Spec', process: 'Insert clock buffer trees to balance clock arrival times', output: 'CTS DEF + Clock Tree', keyMetrics: ['Clock Skew (ps)', 'Clock Latency (ns)'], commonProblems: ['High hold violations post-CTS'], engineeringObjective: 'Deliver clock evenly to all flip-flops', tools: ['Innovus CTS', 'ICC2 CTS'], nextStage: 'Routing', howToFixFailure: 'Insert delay buffers on short data paths.' },
+  { id: 'Routing', num: 10, title: 'Routing', input: 'Placed DEF with CTS', process: 'Global routing → Detailed routing on metal tracks', output: 'Routed DEF file', keyMetrics: ['Routed Nets %', 'Via Count', 'DRC Errors'], commonProblems: ['Metal shorts', 'Spacing DRCs'], engineeringObjective: 'Connect cell pins with physical metal wires', tools: ['Innovus Router', 'ZRoute'], nextStage: 'Parasitic Extraction', howToFixFailure: 'Rip-up and reroute congested regions.' },
+  { id: 'Parasitic Extraction', num: 11, title: 'Parasitic Extraction', input: 'Routed DEF + Process Tech File', process: 'Extract 3D wire resistance and capacitance (coupling & ground)', output: 'SPEF File', keyMetrics: ['Wire Resistance (Ω)', 'Wire Capacitance (fF)'], commonProblems: ['High crosstalk coupling cap'], engineeringObjective: 'Measure actual physical wire parasitics', tools: ['StarRC', 'Quantus QRC'], nextStage: 'STA', howToFixFailure: 'Insert shielding wires or space parallel nets.' },
+  { id: 'STA', num: 12, title: 'STA', input: 'Routed Netlist + SPEF + SDC', process: 'Static timing analysis across all PVT corners', output: 'Timing Signoff Report', keyMetrics: ['WNS (ns)', 'TNS (ns)', 'Hold Violations'], commonProblems: ['Negative setup slack (FAIL)'], engineeringObjective: 'Guarantee zero timing violations across corners', tools: ['PrimeTime', 'Tempus'], nextStage: 'Physical Verification', howToFixFailure: 'Run timing ECO: size up drivers, insert buffers.' },
+  { id: 'Physical Verification', num: 13, title: 'Physical Verification', input: 'GDSII / Routed DEF', process: 'Run Design Rule Check (DRC) and Layout vs Schematic (LVS)', output: 'DRC/LVS Clean Report', keyMetrics: ['DRC Violation Count', 'LVS Mismatch Count'], commonProblems: ['Density DRC error', 'Short circuits'], engineeringObjective: 'Verify manufacturability and connectivity', tools: ['Calibre DRC/LVS', 'IC Validator'], nextStage: 'Signoff', howToFixFailure: 'Insert metal fill for density; fix shorted wires.' },
+  { id: 'Signoff', num: 14, title: 'Signoff', input: 'All Verification Reports', process: 'Executive signoff review across STA, DRC, LVS, IR drop', output: 'Signed Tapeout Checklist', keyMetrics: ['0 DRC', '0 LVS', 'WNS >= 0'], commonProblems: ['Unapproved waivers'], engineeringObjective: 'Formal approval for manufacturing', tools: ['Jira Signoff Portal'], nextStage: 'GDSII', howToFixFailure: 'Resolve all unapproved waivers.' },
+  { id: 'GDSII', num: 15, title: 'GDSII', input: 'Signed Layout', process: 'Stream out geometric polygon format for mask generation', output: 'GDSII / OASIS file', keyMetrics: ['File Size (GB)'], commonProblems: ['Corrupted GDS stream'], engineeringObjective: 'Produce mask deliverable file', tools: ['Innovus StreamOut', 'Calibre'], nextStage: 'Tapeout', howToFixFailure: 'Re-export GDSII with verified layer mapping.' },
+  { id: 'Tapeout', num: 16, title: 'Tapeout', input: 'Verified GDSII / OASIS', process: 'Hand off layout database to foundry for mask fabrication', output: 'Manufactured Wafers & Silicon', keyMetrics: ['Wafer Yield %'], commonProblems: ['Particle defects in fab'], engineeringObjective: 'Fabricate physical silicon chips', tools: ['TSMC / Samsung Fab Line'], nextStage: 'Done', howToFixFailure: 'Prepare B0 mask re-spin for post-silicon bugs.' },
+]
+
+const flowChallenges: Challenge[] = [
   {
-    id: 'RTL',
-    title: 'RTL',
-    what: 'Write hardware at the register-transfer level using code-like descriptions.',
-    why: 'RTL captures the functional behavior of the design before it becomes physical hardware.',
-    input: 'Design intent expressed as RTL code and block diagrams.',
-    output: 'A structural view of registers, combinational logic, and signal flow.',
-    realWorld: 'RTL is the starting point for synthesis and verification in real chip design.',
-    learning:
-      'RTL expresses hardware behavior in a readable form. It is the blueprint that describes how data moves between registers and logic elements.',
-    challengeQuestion: 'Why is RTL written before synthesis?',
-    challengeOptions: ['It describes behavior in high-level hardware terms.', 'It is the final layout ready for fabrication.'],
-    challengeAnswer: 'It describes behavior in high-level hardware terms.',
+    id: 'flow-c1',
+    title: 'Challenge 1: Identify Post-Synthesis Output',
+    question: 'What is the primary output artifact produced by the Logic Synthesis stage?',
+    options: ['GDSII Polygon File', 'Gate-Level Netlist (.v)', 'RTL Source Code', 'Floorplan DEF'],
+    correctAnswer: 'Gate-Level Netlist (.v)',
+    hint: 'Synthesis translates RTL code into a netlist of logic gates.',
+    solution: 'Gate-Level Netlist (.v)',
+    explanation: 'Synthesis reads RTL and outputs a gate-level netlist mapped to standard cells from the technology library.',
   },
   {
-    id: 'Synthesis',
-    title: 'Synthesis',
-    what: 'Translate RTL into a gate-level netlist composed of standard cells.',
-    why: 'Synthesis turns behavioral descriptions into actual digital components that can be placed and routed.',
-    input: 'RTL code and design constraints.',
-    output: 'A netlist of logic gates and cells with timing properties.',
-    realWorld: 'Modern synthesis tools map RTL into cells from a real process technology library.',
-    learning:
-      'Synthesis is the first transformation from an abstract design into a lower-level structure that a physical design tool can use.',
-    challengeQuestion: 'What does synthesis produce?',
-    challengeOptions: ['A gate-level netlist.', 'A final GDSII layout.'],
-    challengeAnswer: 'A gate-level netlist.',
+    id: 'flow-c2',
+    title: 'Challenge 2: Fixing STA Setup Violations',
+    question: 'If the STA stage fails with a Negative Setup Slack (WNS = -0.15ns) after routing, what is the best ECO fix?',
+    options: [
+      'Size up driver cells on the critical path or insert buffers to split long wires.',
+      'Delete the clock tree buffers.',
+      'Increase the supply voltage by 50%.',
+      'Ignore the violation since routing is finished.',
+    ],
+    correctAnswer: 'Size up driver cells on the critical path or insert buffers to split long wires.',
+    hint: 'Timing ECO uses cell resizing and buffer insertion to reduce path delay.',
+    solution: 'Size up driver cells or insert buffers',
+    explanation: 'Sizing up drivers reduces gate delay, and buffer insertion splits capacitive wire delay.',
   },
   {
-    id: 'Netlist',
-    title: 'Netlist',
-    what: 'Organize logic cells and their connections into a component-level circuit.',
-    why: 'The netlist defines how every cell is connected, which is essential for placement and routing.',
-    input: 'Synthesis output with gates and nets.',
-    output: 'A connected graph of logic cells and wires.',
-    realWorld: 'Netlists are used by place and route tools to understand the circuit topology.',
-    learning:
-      'A netlist is like a wiring diagram for an electronic design, listing cells and how they connect.',
-    challengeQuestion: 'Why is the netlist important before placement?',
-    challengeOptions: ['It shows how cells connect to each other.', 'It defines the final silicon mask layers.'],
-    challengeAnswer: 'It shows how cells connect to each other.',
-  },
-  {
-    id: 'Floorplanning',
-    title: 'Floorplanning',
-    what: 'Divide the chip area into regions for standard cells, macros, IO, and power delivery.',
-    why: 'Floorplanning sets the physical organization so later placement and routing work efficiently.',
-    input: 'Netlist, chip area, and module boundaries.',
-    output: 'A chip floorplan with regions assigned for key blocks.',
-    realWorld: 'Floating floorplans are used to reserve space for blocks, clocking, and power in a real design.',
-    learning:
-      'Floorplanning is where designers choose where high-level blocks and resources will sit on the chip.',
-    challengeQuestion: 'Why do we reserve space for macros and IO first?',
-    challengeOptions: ['It helps place the rest of the design efficiently.', 'It guarantees the chip is manufactured faster.'],
-    challengeAnswer: 'It helps place the rest of the design efficiently.',
-  },
-  {
-    id: 'Placement',
-    title: 'Placement',
-    what: 'Position each standard cell in the chip area while respecting the floorplan.',
-    why: 'Good placement keeps wires short and helps meet timing and power goals.',
-    input: 'Floorplan and netlist connectivity.',
-    output: 'A placed cell layout ready for routing.',
-    realWorld: 'Placement arranges millions of cells inside the chip, often using automated tools in industry.',
-    learning:
-      'Placement decides where cells physically sit, which strongly affects performance and power.',
-    challengeQuestion: 'Why can’t we route before placement?',
-    challengeOptions: ['Because wires need cell positions to connect.', 'Because timing analysis is not needed yet.'],
-    challengeAnswer: 'Because wires need cell positions to connect.',
-  },
-  {
-    id: 'Clock Tree Synthesis',
-    title: 'Clock Tree Synthesis',
-    what: 'Create a balanced network that distributes the clock signal to sequential cells.',
-    why: 'CTS ensures clock edges arrive at all flip-flops at the right time.',
-    input: 'Placed cell locations and clock sources.',
-    output: 'A clock distribution tree that reaches all timing points.',
-    realWorld: 'A robust clock tree is critical for reliable performance in real chips.',
-    learning:
-      'Clock tree synthesis builds the path that delivers the clock signal to every flip-flop in the design.',
-    challengeQuestion: 'What is the goal of CTS?',
-    challengeOptions: ['Deliver the clock evenly across the chip.', 'Reduce power by removing clocks.'],
-    challengeAnswer: 'Deliver the clock evenly across the chip.',
-  },
-  {
-    id: 'Routing',
-    title: 'Routing',
-    what: 'Connect placed cells with metal wires while avoiding congestion and design rule violations.',
-    why: 'Routing forms the actual electrical connections between cells and IO pins.',
-    input: 'Placed cells and timing-driven nets.',
-    output: 'A routed metal layer layout with completed connectivity.',
-    realWorld: 'Routing finalizes the chip wiring that will be manufactured on silicon.',
-    learning:
-      'Routing draws the metal wires that connect the placed cells according to the netlist.',
-    challengeQuestion: 'Why is routing harder after placement?',
-    challengeOptions: ['Because cell locations determine where wires must run.', 'Because power is not yet connected.'],
-    challengeAnswer: 'Because cell locations determine where wires must run.',
-  },
-  {
-    id: 'Physical Verification',
-    title: 'Physical Verification',
-    what: 'Check the design against manufacturing and electrical rules.',
-    why: 'Verification catches violations before tapeout to avoid costly re-spins.',
-    input: 'Completed routed layout.',
-    output: 'A verification report with DRC, LVS, timing, and power results.',
-    realWorld: 'Physical verification is mandatory before a chip can be sent to fabrication.',
-    learning:
-      'Physical verification validates that the layout follows the foundry rules and matches the intended circuit.',
-    challengeQuestion: 'What does LVS verify?',
-    challengeOptions: ['The layout matches the schematic connectivity.', 'The chip floorplan is correct.'],
-    challengeAnswer: 'The layout matches the schematic connectivity.',
-  },
-  {
-    id: 'GDSII',
-    title: 'GDSII',
-    what: 'Generate the final layout file used by foundries to manufacture the chip.',
-    why: 'GDSII is the delivery format for the final silicon mask data.',
-    input: 'Verified physical layout and design data.',
-    output: 'A GDSII file containing the chip mask representation.',
-    realWorld: 'The GDSII file is the final artifact sent to the foundry for fabrication.',
-    learning:
-      'GDSII represents the completed chip layout in a standard format used by manufacturing.',
-    challengeQuestion: 'What is GDSII used for?',
-    challengeOptions: ['Sending the layout to manufacturing.', 'Simulating RTL behavior.'],
-    challengeAnswer: 'Sending the layout to manufacturing.',
+    id: 'flow-c3',
+    title: 'Challenge 3: Purpose of LVS',
+    question: 'What does Layout vs Schematic (LVS) verify in physical verification?',
+    options: [
+      'That physical layout connections match the schematic netlist exactly.',
+      'That the chip runs at 1 GHz.',
+      'That metal density is 100%.',
+      'That the silicon wafer is 300mm wide.',
+    ],
+    correctAnswer: 'That physical layout connections match the schematic netlist exactly.',
+    hint: 'LVS compares extracted layout devices and nets against the reference synthesis netlist.',
+    solution: 'Matches layout to schematic netlist',
+    explanation: 'LVS checks device types, sizes, and electrical connections between layout and schematic.',
   },
 ]
 
-const stageCount = stages.length
+export default function PhysicalDesignFlow() {
+  const [mode, setMode] = useState<Mode>('LEARNING')
+  const [activeStageId, setActiveStageId] = useState<StageId>('Synthesis')
+  const [stageStatuses, setStageStatuses] = useState<Record<string, RunStatus>>({})
 
-// Macro coordinates and sizes are normalized fractions (0..1) relative to die dimensions
-type Macro = {
-  id: string
-  label: string
-  x: number // fraction of die width
-  y: number // fraction of die height
-  width: number // fraction of die width
-  height: number // fraction of die height
-}
+  const activeStage = useMemo(
+    () => flowStages.find((s) => s.id === activeStageId) || flowStages[4],
+    [activeStageId]
+  )
 
-// default positions converted to fractions relative to initial dieWidth=400 and dieHeight=320
-const defaultMacros: Macro[] = [
-  { id: 'M1', label: 'Macro A', x: 8 / 400, y: 12 / 320, width: 24 / 400, height: 18 / 320 },
-  { id: 'M2', label: 'Macro B', x: 48 / 400, y: 14 / 320, width: 22 / 400, height: 16 / 320 },
-  { id: 'M3', label: 'Macro C', x: 20 / 400, y: 50 / 320, width: 20 / 400, height: 20 / 320 },
-]
-
-function PhysicalDesignFlow() {
-  const [activeIndex, setActiveIndex] = useState(0)
-  const [answer, setAnswer] = useState<string>('')
-  const [dieWidth, setDieWidth] = useState(400)
-  const [dieHeight, setDieHeight] = useState(320)
-  const [utilization, setUtilization] = useState(60)
-  const [margin, setMargin] = useState(18)
-  const [macros, setMacros] = useState<Macro[]>(defaultMacros)
-  const [draggingMacro, setDraggingMacro] = useState<string | null>(null)
-  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const [selectedMacro, setSelectedMacro] = useState<string | null>(null)
-
-  const stage = useMemo(() => stages[activeIndex], [activeIndex])
-
-  const progressLabel = `${activeIndex + 1} / ${stageCount}`
-
-  const challengeFeedback = useMemo(() => {
-    if (!answer) return 'Choose the best answer to check your understanding.'
-    return answer === stage.challengeAnswer
-      ? 'Correct! That is the best explanation for this stage.'
-      : 'Not quite — review the stage summary and try again.'
-  }, [answer, stage.challengeAnswer])
-
-  const handleNavigation = (delta: number) => {
-    setActiveIndex((prev) => {
-      const next = prev + delta
-      if (next < 0) return 0
-      if (next >= stageCount) return stageCount - 1
-      return next
-    })
-    setAnswer('')
+  const handleRunStage = (stageId: string) => {
+    setStageStatuses((prev) => ({ ...prev, [stageId]: 'RUNNING' }))
+    setTimeout(() => {
+      // Intentionally simulate STA failing 50% of the time for educational learning
+      const isSTAFailure = stageId === 'STA' && Math.random() > 0.5
+      setStageStatuses((prev) => ({
+        ...prev,
+        [stageId]: isSTAFailure ? 'FAILED' : 'PASSED',
+      }))
+    }, 1200)
   }
 
-  const handleReset = () => {
-    setActiveIndex(0)
-    setAnswer('')
-    setDieWidth(400)
-    setDieHeight(320)
-    setUtilization(60)
-    setMargin(18)
-    setMacros(defaultMacros)
-    setSelectedMacro(null)
-    setAnswer('')
+  const handleResetFlow = () => {
+    setActiveStageId('Synthesis')
+    setStageStatuses({})
   }
 
-  const dieArea = dieWidth * dieHeight
-  const usedArea = dieArea * (utilization / 100)
-  const coreWidth = dieWidth - margin * 2
-  const coreHeight = dieHeight - margin * 2
-  const coreArea = coreWidth * coreHeight
-  const congestion = Math.min(100, Math.max(10, utilization + (macros.length - 2) * 6))
-  const wireEstimate = Math.round((dieWidth + dieHeight) * (utilization / 35))
-  const overlapWarnings = useMemo(() => {
-    const warnings: string[] = []
-    const macroPixels = macros.map((m) => ({
-      id: m.id,
-      label: m.label,
-      x: m.x * dieWidth,
-      y: m.y * dieHeight,
-      w: m.width * dieWidth,
-      h: m.height * dieHeight,
-    }))
-
-    for (let i = 0; i < macroPixels.length; i += 1) {
-      const a = macroPixels[i]
-      for (let j = i + 1; j < macroPixels.length; j += 1) {
-        const b = macroPixels[j]
-        const intersects = a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
-        if (intersects) warnings.push(`${a.label} overlaps ${b.label}.`)
-      }
-      if (a.x < margin || a.y < margin || a.x + a.w > dieWidth - margin || a.y + a.h > dieHeight - margin) {
-        warnings.push(`${a.label} is outside the core boundary.`)
-      }
-    }
-
-    return warnings
-  }, [macros, dieWidth, dieHeight, margin])
-
-  // placement check used only in render when needed
-
-  const handleMacroPointerDown = (event: PointerEvent<HTMLDivElement>, id: string) => {
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    setDraggingMacro(id)
-    setDragOffset({ x: event.clientX - rect.left, y: event.clientY - rect.top })
-    setSelectedMacro(id)
-  }
-
-  const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!draggingMacro) return
-    const areaRect = event.currentTarget.getBoundingClientRect()
-    const xPx = event.clientX - areaRect.left - dragOffset.x
-    const yPx = event.clientY - areaRect.top - dragOffset.y
-
-    setMacros((prev) =>
-      prev.map((macro) => {
-        if (macro.id !== draggingMacro) return macro
-        const macroPxW = macro.width * dieWidth
-        const macroPxH = macro.height * dieHeight
-        const minX = margin
-        const minY = margin
-        const maxX = dieWidth - margin - macroPxW
-        const maxY = dieHeight - margin - macroPxH
-        const clampedX = Math.max(minX, Math.min(xPx, maxX))
-        const clampedY = Math.max(minY, Math.min(yPx, maxY))
-        return {
-          ...macro,
-          x: clampedX / dieWidth,
-          y: clampedY / dieHeight,
-        }
-      }),
-    )
-  }
-
-  const handlePointerUp = () => {
-    setDraggingMacro(null)
-  }
-
-  // placement -> routing coupling: receive cell updates from PlacementLab
-  type PlacementCell = { id: string; x: number; y: number; w: number; h: number }
-  const [placementCells, setPlacementCells] = useState<PlacementCell[] | null>(null)
-
-  const pinsFromPlacement = useMemo(() => {
-    if (!placementCells || placementCells.length === 0) return undefined
-    return placementCells.map((c, idx) => ({ id: c.id ?? `P${idx + 1}`, x: c.x + c.w / 2, y: c.y + c.h / 2 }))
-  }, [placementCells])
-
-  const netsFromPlacement = useMemo(() => {
-    if (!placementCells || placementCells.length < 2) return undefined
-    const nets: [number, number][] = []
-    for (let i = 0; i + 1 < placementCells.length; i += 2) nets.push([i, i + 1])
-    return nets
-  }, [placementCells])
-
-  type ClockMetrics = { insertionDelay: number; maxDelay: number; minDelay: number; skew: number; fanout: number }
-  type RoutingMetrics = { totalRouteLength: number; estimateDelay: number; trackUtilization: number; congestedRegions: number }
-
-  const [clockMetrics, setClockMetrics] = useState<ClockMetrics | null>(null)
-  const [routingMetrics, setRoutingMetrics] = useState<RoutingMetrics | null>(null)
+  const currentStatus = stageStatuses[activeStage.id] || 'NOT_STARTED'
 
   return (
     <section className="section physical-design-section" id="physical-design">
-      <div className="section-heading">
-        <p className="section-eyebrow">RTL-to-GDS Visualizer</p>
-        <h2>Interactive physical design flow from RTL to chip layout</h2>
-        <p className="section-description">
-          Explore each major stage in the physical design flow with guided visuals, beginner explanations, and challenge questions.
-        </p>
+      <LabHeader
+        title="RTL-to-GDSII Flow Visualizer & Pipeline Lab"
+        subtitle="Explore all 16 stages of physical design from specification to tapeout. Run stages, inspect failure modes, and apply fixes."
+        icon="🏭"
+        difficulty="Intermediate"
+        mode={mode}
+        onModeChange={setMode}
+        onReset={handleResetFlow}
+      />
+
+      {/* Pipeline Navigation Bar */}
+      <div className="flow-pipeline-scroll-wrap">
+        <div className="flow-pipeline-track">
+          {flowStages.map((stage) => {
+            const isActive = stage.id === activeStageId
+            const status = stageStatuses[stage.id] || 'NOT_STARTED'
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                className={`pipeline-node-btn ${isActive ? 'active' : ''} ${status.toLowerCase()}`}
+                onClick={() => setActiveStageId(stage.id)}
+              >
+                <span className="p-num">{stage.num}</span>
+                <span className="p-title">{stage.title}</span>
+                {status === 'PASSED' && <span className="p-status-icon">✓</span>}
+                {status === 'FAILED' && <span className="p-status-icon">✕</span>}
+                {status === 'RUNNING' && <span className="p-status-icon">⏳</span>}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
-      <div className="physical-design-grid">
-        <div className="physical-design-sidebar">
-          <div className="stage-summary-card">
-            <div className="stage-progress">
-              <span>Stage {progressLabel}</span>
-              <strong>{stage.title}</strong>
-            </div>
-            <div className="stage-summary-text">
-              <p>{stage.what}</p>
-            </div>
-            <div className="button-row">
-              <button className="button secondary" type="button" onClick={() => handleNavigation(-1)} disabled={activeIndex === 0}>
-                Previous Stage
-              </button>
-              <button className="button secondary" type="button" onClick={() => handleNavigation(1)} disabled={activeIndex === stageCount - 1}>
-                Next Stage
-              </button>
-            </div>
-            <button className="button secondary" type="button" onClick={handleReset}>
-              Reset
+      <div className="flow-lab-main-grid">
+        {/* Left Column: Stage Details */}
+        <div className="flow-stage-detail-card">
+          <div className="stage-detail-header">
+            <div className="stage-num-badge">Stage {activeStage.num} of 16</div>
+            <h3>{activeStage.title}</h3>
+            <span className={`run-status-badge ${currentStatus.toLowerCase()}`}>
+              Status: {currentStatus.replace('_', ' ')}
+            </span>
+          </div>
+
+          <div className="stage-action-bar">
+            <button
+              type="button"
+              className="button primary"
+              disabled={currentStatus === 'RUNNING'}
+              onClick={() => handleRunStage(activeStage.id)}
+            >
+              {currentStatus === 'RUNNING' ? '⏳ Simulating Stage...' : `▶ Run Stage: ${activeStage.title}`}
             </button>
           </div>
 
-          <div className="stage-bar" role="navigation" aria-label="Physical design stages">
-            {stages.map((item, index) => (
-              <button
-                key={item.id}
-                type="button"
-                className={`stage-pill ${index === activeIndex ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveIndex(index)
-                  setAnswer('')
-                }}
-              >
-                {item.title}
-              </button>
-            ))}
+          {currentStatus === 'FAILED' && (
+            <div className="stage-failure-alert">
+              <h4>⚠ Stage Execution Failed!</h4>
+              <p><strong>Common Issue:</strong> {activeStage.commonProblems[0]}</p>
+              <p><strong>How to Fix It:</strong> {activeStage.howToFixFailure}</p>
+            </div>
+          )}
+
+          <div className="stage-grid-info">
+            <div className="info-box">
+              <strong>📥 INPUT</strong>
+              <p>{activeStage.input}</p>
+            </div>
+            <div className="info-box">
+              <strong>⚙️ PROCESS</strong>
+              <p>{activeStage.process}</p>
+            </div>
+            <div className="info-box">
+              <strong>📤 OUTPUT</strong>
+              <p className="highlight-text">{activeStage.output}</p>
+            </div>
+            <div className="info-box">
+              <strong>🎯 ENGINEERING OBJECTIVE</strong>
+              <p>{activeStage.engineeringObjective}</p>
+            </div>
           </div>
 
-          <div className="analysis-card physical-details-card">
-            <h3>What happens</h3>
-            <p>{stage.what}</p>
-            <h3>Why it is needed</h3>
-            <p>{stage.why}</p>
-            <h3>Input</h3>
-            <p>{stage.input}</p>
-            <h3>Output</h3>
-            <p>{stage.output}</p>
-            <h3>Real-world meaning</h3>
-            <p>{stage.realWorld}</p>
+          <div className="stage-tools-section">
+            <strong>Industry Tools Used:</strong>
+            <div className="tool-tags">
+              {activeStage.tools.map((t) => <span key={t} className="tool-tag">{t}</span>)}
+            </div>
           </div>
+        </div>
 
-          <div className="analysis-card">
-            <h3>Why does this matter?</h3>
-            <p>{stage.learning}</p>
-          </div>
-
-          <div className="analysis-card challenge-card">
-            <h3>Think About It</h3>
-            <p>{stage.challengeQuestion}</p>
-            <div className="challenge-buttons">
-              {stage.challengeOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`button secondary ${answer === option ? 'active' : ''}`}
-                  onClick={() => setAnswer(option)}
-                >
-                  {option}
-                </button>
+        {/* Right Column: Metrics & Mode View */}
+        <div className="flow-stage-side-card">
+          <div className="flow-metrics-box">
+            <h4>Key Stage Metrics</h4>
+            <div className="metrics-pill-list">
+              {activeStage.keyMetrics.map((m) => (
+                <MetricCard key={m} label={m} value="Monitored" status="good" />
               ))}
             </div>
-            <p className={`challenge-feedback ${answer === stage.challengeAnswer ? 'correct' : answer ? 'incorrect' : ''}`}>
-              {challengeFeedback}
-            </p>
           </div>
-        </div>
 
-        <div className="physical-design-main">
-          <div className="physical-design-panel">
-            <div className="panel-label small">Educational visualization — simplified representation</div>
-            <div className="visualization-card">
-              <div className="visualization-header">
-                <div>
-                  <p className="eyebrow">Stage visualization</p>
-                  <h3>{stage.title}</h3>
-                </div>
-                <div className="visual-note">Interactive representation only</div>
-              </div>
+          <div className="flow-problems-box">
+            <h4>Common Failure Modes</h4>
+            <ul>
+              {activeStage.commonProblems.map((p) => <li key={p}>⚠ {p}</li>)}
+            </ul>
+          </div>
 
-              <div className={`flow-visualization stage-${stage.id.toLowerCase().replace(/\s+/g, '-')}`}>
-                {stage.id === 'RTL' && (
-                  <div className="rtl-visual">
-                    <div className="rtl-code">
-                      <pre>{`module alu(input A, input B, output Y);
-  assign Y = A & B;
-endmodule`}</pre>
-                    </div>
-                    <div className="rtl-blocks">
-                      <div className="rtl-block">Register</div>
-                      <div className="rtl-block">Logic</div>
-                      <div className="rtl-block">Output</div>
-                    </div>
-                  </div>
-                )}
-
-                {stage.id === 'Synthesis' && (
-                  <div className="synthesis-visual">
-                    <div className="synthesis-column">
-                      <div className="synthesis-stage">RTL</div>
-                      <div className="synthesis-stage">Code</div>
-                    </div>
-                    <div className="synthesis-arrow">⟶</div>
-                    <div className="synthesis-column cells">
-                      <div className="cell-chip">AND</div>
-                      <div className="cell-chip">OR</div>
-                      <div className="cell-chip">NOT</div>
-                    </div>
-                  </div>
-                )}
-
-                {stage.id === 'Netlist' && (
-                  <div className="netlist-visual">
-                    <div className="netlist-node">A</div>
-                    <div className="netlist-node center">AND</div>
-                    <div className="netlist-node">B</div>
-                    <div className="netlist-node bottom">Y</div>
-                    <svg className="netlist-lines" viewBox="0 0 220 140" aria-hidden="true">
-                      <path d="M40 30 L90 50" stroke="#5f90ff" strokeWidth="3" fill="none" />
-                      <path d="M40 110 L90 80" stroke="#5f90ff" strokeWidth="3" fill="none" />
-                      <path d="M170 70 L120 70" stroke="#5f90ff" strokeWidth="3" fill="none" />
-                      <path d="M120 70 L120 110" stroke="#5f90ff" strokeWidth="3" fill="none" />
-                    </svg>
-                  </div>
-                )}
-
-                {stage.id === 'Floorplanning' && (
-                  <div className="floorplanning-scene">
-                    <div className="floorplan-controls">
-                      <div className="control-panel">
-                        <h4>Chip geometry</h4>
-                        <label>
-                          Die width
-                          <input
-                            type="range"
-                            min="300"
-                            max="520"
-                            step="20"
-                            value={dieWidth}
-                            onChange={(event) => setDieWidth(Number(event.target.value))}
-                          />
-                          <span>{dieWidth} px</span>
-                        </label>
-                        <label>
-                          Die height
-                          <input
-                            type="range"
-                            min="240"
-                            max="420"
-                            step="20"
-                            value={dieHeight}
-                            onChange={(event) => setDieHeight(Number(event.target.value))}
-                          />
-                          <span>{dieHeight} px</span>
-                        </label>
-                        <label>
-                          Utilization
-                          <input
-                            type="range"
-                            min="40"
-                            max="90"
-                            step="5"
-                            value={utilization}
-                            onChange={(event) => setUtilization(Number(event.target.value))}
-                          />
-                          <span>{utilization} %</span>
-                        </label>
-                        <label>
-                          Core margin
-                          <input
-                            type="range"
-                            min="10"
-                            max="32"
-                            step="2"
-                            value={margin}
-                            onChange={(event) => setMargin(Number(event.target.value))}
-                          />
-                          <span>{margin} px</span>
-                        </label>
-                      </div>
-
-                      <div className="metric-panel">
-                        <div className="metric-card">
-                          <strong>{dieArea.toLocaleString()}</strong>
-                          <span>Die area</span>
-                        </div>
-                        <div className="metric-card">
-                          <strong>{coreArea.toLocaleString()}</strong>
-                          <span>Core area</span>
-                        </div>
-                        <div className="metric-card">
-                          <strong>{Math.round(usedArea).toLocaleString()}</strong>
-                          <span>Used area</span>
-                        </div>
-                        <div className="metric-card">
-                          <strong>{congestion}%</strong>
-                          <span>Estimated congestion</span>
-                        </div>
-                        <div className="metric-card">
-                          <strong>{wireEstimate}</strong>
-                          <span>Wirelength score</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      className="floorplan-board"
-                      style={{ width: dieWidth, height: dieHeight }}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp}
-                      onPointerLeave={handlePointerUp}
-                    >
-                      <div className="board-label die-label">DIE AREA</div>
-                      <div
-                        className="core-outline"
-                        style={{
-                          left: margin,
-                          top: margin,
-                          width: coreWidth,
-                          height: coreHeight,
-                        }}
-                      >
-                        <span>CORE AREA</span>
-                      </div>
-                      {macros.map((macro) => {
-                        const leftPx = macro.x * dieWidth
-                        const topPx = macro.y * dieHeight
-                        const widthPx = macro.width * dieWidth
-                        const heightPx = macro.height * dieHeight
-                        return (
-                          <div
-                            key={macro.id}
-                            className={`macro-item ${selectedMacro === macro.id ? 'selected' : ''}`}
-                            style={{
-                              left: leftPx,
-                              top: topPx,
-                              width: widthPx,
-                              height: heightPx,
-                            }}
-                            onPointerDown={(event) => handleMacroPointerDown(event, macro.id)}
-                          >
-                            <span>{macro.label}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    <div className="floorplan-status">
-                      <div className="status-line">
-                        <strong>{overlapWarnings.length > 0 ? 'Warning' : 'Healthy design'}</strong>
-                        <span>
-                          {overlapWarnings.length > 0
-                            ? 'Resolve overlaps or core boundary violations by dragging macros inside the core.'
-                            : 'Macro placement is within the core and the scene is stable.'}
-                        </span>
-                      </div>
-                      <div className="warning-list">
-                        {overlapWarnings.length > 0 ? (
-                          overlapWarnings.map((warning) => (
-                            <div key={warning} className="warning-item">
-                              {warning}
-                            </div>
-                          ))
-                        ) : (
-                          <div className="warning-item positive">No overlaps detected.</div>
-                        )}
-                      </div>
-                      <p className="scene-note">
-                        Drag a macro to adjust placement. The visual scene shows die/core geometry, utilization, wiring, and placement quality together.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {stage.id === 'Placement' && (
-                  <PlacementLab dieWidth={dieWidth} dieHeight={dieHeight} margin={margin} onCellsChange={setPlacementCells} />
-                )}
-
-                {stage.id === 'Clock Tree Synthesis' && (
-                  <div className="cts-visual">
-                    <ClockTreeLab onClockChange={setClockMetrics} />
-                    <div style={{ marginTop: 12 }}>
-                      <TimingLab skew={clockMetrics?.skew ?? 0} clockPeriod={1.5} />
-                    </div>
-                  </div>
-                )}
-
-                {stage.id === 'Routing' && (
-                  <div>
-                    <RoutingLab dieWidth={dieWidth} dieHeight={dieHeight} margin={margin} pins={pinsFromPlacement} nets={netsFromPlacement} onMetrics={setRoutingMetrics} />
-                    <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-                      <TimingLab skew={clockMetrics?.skew ?? 0} combDelay={1.0 + (routingMetrics?.estimateDelay ?? 0) / 200} wireDelay={(routingMetrics?.totalRouteLength ?? 0) / 2000} />
-                      <PowerLab />
-                    </div>
-                  </div>
-                )}
-
-                {stage.id === 'Physical Verification' && (
-                  <PhysicalVerificationLab />
-                )}
-
-                {stage.id === 'GDSII' && (
-                  <div className="gdsii-visual">
-                    <div className="gdsii-chip">
-                      <div className="gdsii-row">
-                        <div />
-                        <div />
-                        <div />
-                      </div>
-                      <div className="gdsii-row">
-                        <div />
-                        <div className="gdsii-block" />
-                        <div />
-                      </div>
-                      <div className="gdsii-row">
-                        <div />
-                        <div />
-                        <div />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+          {mode === 'ENGINEERING' ? (
+            <EquationBreakdown
+              title="Physical Design Metric Relationship"
+              formula="Utilization = \frac{\text{Cell Area}}{\text{Core Area}} \times 100\% \quad \text{and} \quad \text{Slack} = DRT - DAT"
+              variables={[
+                { symbol: 'Core Area', name: 'Core Area', value: 10000, unit: 'μm²' },
+                { symbol: 'Cell Area', name: 'Used Area', value: 7000, unit: 'μm²' },
+              ]}
+              substitution="Utilization = (7000 / 10000) * 100%"
+              calculation="Utilization = 70%"
+              result="70% Core Utilization (Balanced Routability)"
+              physicalMeaning="Every physical design stage balances area utilization, routing track capacity, power grid resistance, and clock skew."
+            />
+          ) : (
+            <div className="learning-panel-box">
+              <h4>🎓 Learning Takeaway</h4>
+              <p>
+                Next Stage: <strong>{activeStage.nextStage}</strong>. The output of <strong>{activeStage.title}</strong> directly becomes the input for <strong>{activeStage.nextStage}</strong>.
+              </p>
             </div>
-          </div>
+          )}
         </div>
       </div>
+
+      <ChallengeCard labId="flow" challenges={flowChallenges} />
     </section>
   )
 }
-
-export default PhysicalDesignFlow

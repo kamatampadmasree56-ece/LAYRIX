@@ -3,12 +3,14 @@ import './App.css'
 import CMOSInverterLab from './components/CMOSInverterLab'
 import DigitalLogicLab from './components/DigitalLogicLab'
 import PhysicalDesignFlow from './components/PhysicalDesignFlow'
+import PlacementLab from './components/PlacementLab'
+import RoutingLab from './components/RoutingLab'
 import RTLVerilogLab from './components/RTLVerilogLab'
 import SynthesisLab from './components/SynthesisLab'
 import type { SynthesisMetrics } from './components/SynthesisLab'
 import VLSIMathLab from './components/VLSIMathLab'
 
-// New Components
+// New Components & Labs
 import RoadmapSection from './components/RoadmapSection'
 import SixPillars from './components/SixPillars'
 import VideoLearning from './components/VideoLearning'
@@ -19,6 +21,7 @@ import PracticeSection from './components/PracticeSection'
 import TapeoutPath from './components/TapeoutPath'
 import ProjectsSection from './components/ProjectsSection'
 import ProgressTracker from './components/ProgressTracker'
+import { LabDashboard } from './components/labs/LabDashboard'
 import { loadProgress } from './utils/progressStorage'
 
 const navItems = [
@@ -135,7 +138,7 @@ function App() {
                   <span>Learning Pillars</span>
                 </div>
                 <div className="stat-item">
-                  <strong>10</strong>
+                  <strong>7+</strong>
                   <span>Visual Labs</span>
                 </div>
                 <div className="stat-item">
@@ -162,32 +165,41 @@ function App() {
             <p className="section-eyebrow">Interactive Simulation Suite</p>
             <h2>Educational Visual Laboratories</h2>
             <p className="section-description">
-              Hands-on interactive simulators for Digital Logic, Flip-Flops, FSMs, CMOS Inverters, Synthesis, RTL/Verilog, Placement, Routing, and Physical Verification.
+              Hands-on interactive simulators for Flip-Flops, FSMs, RTL-to-GDSII Flow, Placement, Routing, CMOS Inverters, and Digital Logic.
             </p>
           </div>
 
-          {/* Interactive Flip-Flop Lab */}
+          {/* Interactive Lab Dashboard Landing */}
+          <LabDashboard />
+
+          {/* 1. Interactive Flip-Flop Lab */}
           <FlipFlopLab />
 
-          {/* Interactive FSM Lab */}
+          {/* 2. Interactive FSM Lab */}
           <FSMLab />
 
-          {/* RTL-to-GDSII Flow & Placement/Routing/CTS/Verification Lab */}
+          {/* 3. RTL-to-GDSII Flow Lab */}
           <PhysicalDesignFlow />
 
-          {/* Digital Logic Gates Lab */}
-          <DigitalLogicLab />
+          {/* 4. Interactive Placement Lab */}
+          <PlacementLab />
 
-          {/* CMOS Inverter Lab */}
+          {/* 5. Interactive Routing Lab */}
+          <RoutingLab />
+
+          {/* 6. CMOS Inverter Lab */}
           <CMOSInverterLab />
 
-          {/* Synthesis Lab */}
+          {/* 7. Digital Logic Gates Lab */}
+          <DigitalLogicLab />
+
+          {/* Supporting Synthesis Lab */}
           <SynthesisLab onSynthesisChange={setSynthMetrics} />
 
-          {/* RTL Verilog Lab */}
+          {/* Supporting RTL Verilog Lab */}
           <RTLVerilogLab />
 
-          {/* Basic Math Lab */}
+          {/* Supporting Basic Math Lab */}
           <VLSIMathLab />
         </div>
 

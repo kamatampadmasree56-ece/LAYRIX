@@ -1,300 +1,380 @@
-import { useMemo, useState } from 'react'
+import { useState, useMemo } from 'react'
+import { LabHeader, type Mode } from './labs/LabHeader'
+import { MetricCard } from './labs/MetricCard'
+import { EquationBreakdown } from './labs/EquationBreakdown'
+import { ChallengeCard, type Challenge } from './labs/ChallengeCard'
 
-type WaveformPoint = { t: number; clk: number; d: number; q: number; qbar: number }
+type FFType = 'D' | 'JK' | 'T'
 
-function generateWaveform(dValues: (0 | 1)[], resetAt: number): WaveformPoint[] {
+type WaveformPoint = { t: number; clk: number; input1: number; input2: number; q: number; qbar: number }
+
+function generateWaveform(history: { clk: number; input1: number; input2: number; q: number }[]): WaveformPoint[] {
   const pts: WaveformPoint[] = []
+  const T = 40
   let q: 0 | 1 = 0
-  const T = 40 // clock period in px units
 
-  for (let cycle = 0; cycle < dValues.length; cycle++) {
+  history.forEach((item, cycle) => {
     const t0 = cycle * T
-    const d = dValues[cycle]
-    const rst = cycle === resetAt ? 1 : 0
+    const input1 = item.input1
+    const input2 = item.input2
 
-    // Before clock edge — current state
-    pts.push({ t: t0, clk: 0, d, q, qbar: (q ^ 1) as 0 | 1 })
-    pts.push({ t: t0 + T / 2, clk: 0, d, q, qbar: (q ^ 1) as 0 | 1 })
-    pts.push({ t: t0 + T / 2, clk: 1, d, q, qbar: (q ^ 1) as 0 | 1 })
+    pts.push({ t: t0, clk: 0, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
+    pts.push({ t: t0 + T / 2, clk: 0, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
+    pts.push({ t: t0 + T / 2, clk: 1, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
 
-    // After clock edge — capture D (or reset)
-    const newQ: 0 | 1 = rst ? 0 : d
-    q = newQ
-    pts.push({ t: t0 + T / 2 + 2, clk: 1, d, q, qbar: (q ^ 1) as 0 | 1 })
-    pts.push({ t: t0 + T, clk: 1, d, q, qbar: (q ^ 1) as 0 | 1 })
-    pts.push({ t: t0 + T, clk: 0, d, q, qbar: (q ^ 1) as 0 | 1 })
-  }
+    q = item.q as 0 | 1
+    pts.push({ t: t0 + T / 2 + 2, clk: 1, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
+    pts.push({ t: t0 + T, clk: 1, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
+    pts.push({ t: t0 + T, clk: 0, input1, input2, q, qbar: (q ^ 1) as 0 | 1 })
+  })
+
   return pts
 }
 
-function WaveformDisplay({ points, width }: { points: WaveformPoint[]; width: number }) {
-  const H = 30
-  const gap = 18
-  const rows = [
-    { label: 'CLK', key: 'clk' as keyof WaveformPoint, color: '#94A3B8' },
-    { label: 'D', key: 'd' as keyof WaveformPoint, color: '#2563EB' },
-    { label: 'Q', key: 'q' as keyof WaveformPoint, color: '#22C55E' },
-    { label: 'Q̄', key: 'qbar' as keyof WaveformPoint, color: '#EF4444' },
-  ]
-  const totalH = rows.length * (H + gap) + 16
-
-  const toPath = (key: keyof WaveformPoint) => {
-    return points.map((p, i) => {
-      const x = (p.t / 240) * width
-      const yVal = (p[key] as number) === 1 ? 4 : H - 4
-      return `${i === 0 ? 'M' : 'L'} ${x} ${yVal}`
-    }).join(' ')
-  }
-
-  return (
-    <svg viewBox={`0 0 ${width} ${totalH}`} className="waveform-svg" aria-label="Flip-flop timing waveform">
-      {rows.map((row, ri) => {
-        const yBase = ri * (H + gap)
-        return (
-          <g key={row.key} transform={`translate(0,${yBase})`}>
-            <text x="2" y={H / 2 + 4} fontSize="10" fill="#94A3B8" fontFamily="JetBrains Mono, monospace">{row.label}</text>
-            <path
-              d={toPath(row.key)}
-              stroke={row.color}
-              strokeWidth="2"
-              fill="none"
-              transform="translate(36,0)"
-            />
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-type TimingStep = {
-  clock: string
-  d: number | string
-  q: number | string
-  qbar: number | string
-  explanation: string
-}
+const ffChallenges: Challenge[] = [
+  {
+    id: 'ff-c1',
+    title: 'Challenge 1: Predict D Flip-Flop Output',
+    question: 'In a D Flip-Flop, if current Q = 0, Reset = 0, and D = 1, what will Q become after the next active clock edge?',
+    options: ['0', '1', 'Metastable', 'Toggles to 0'],
+    correctAnswer: '1',
+    hint: 'D flip-flops directly capture D at the rising clock edge.',
+    solution: 'Q becomes 1',
+    explanation: 'On the rising clock edge, Q captures the value of D (which is 1).',
+  },
+  {
+    id: 'ff-c2',
+    title: 'Challenge 2: JK Flip-Flop Toggle Mode',
+    question: 'For a JK Flip-Flop with current Q = 1, if J = 1 and K = 1 when the clock edge occurs, what is the new Q?',
+    options: ['0', '1', 'Latch Hold (1)', 'Undefined'],
+    correctAnswer: '0',
+    hint: 'When J=1 and K=1, the JK Flip-Flop operates in TOGGLE mode.',
+    solution: 'Q becomes 0',
+    explanation: 'When J=1 and K=1, the output toggles. Since current Q was 1, it toggles to 0.',
+  },
+  {
+    id: 'ff-c3',
+    title: 'Challenge 3: T Flip-Flop Hold Mode',
+    question: 'In a T Flip-Flop, if T = 0 when the clock rises, what happens to Q?',
+    options: ['Q holds its current state', 'Q toggles to 0', 'Q sets to 1', 'Q resets to 0'],
+    correctAnswer: 'Q holds its current state',
+    hint: 'T=0 means NO toggle (Hold mode).',
+    solution: 'Q holds current state',
+    explanation: 'When T=0, the T flip-flop maintains its previous state (Hold).',
+  },
+]
 
 export default function FlipFlopLab() {
-  const [dInput, setDInput] = useState<0 | 1>(0)
-  const [resetPressed, setResetPressed] = useState(false)
-  const [dHistory, setDHistory] = useState<(0 | 1)[]>([0, 0, 0, 0, 0])
-  const [qHistory, setQHistory] = useState<(0 | 1)[]>([0])
-  const [stepCount, setStepCount] = useState(0)
-  const [resetAtCycle, setResetAtCycle] = useState<number>(-1)
-  const [showSetupHold, setShowSetupHold] = useState(false)
+  const [mode, setMode] = useState<Mode>('LEARNING')
+  const [ffType, setFfType] = useState<FFType>('D')
 
-  const currentQ: 0 | 1 = qHistory[qHistory.length - 1] ?? 0
-  const currentQbar: 0 | 1 = (currentQ ^ 1) as 0 | 1
+  // Inputs
+  const [inputVal1, setInputVal1] = useState<0 | 1>(1) // D or J or T
+  const [inputVal2, setInputVal2] = useState<0 | 1>(0) // K for JK
+  const [reset, setReset] = useState<boolean>(false)
+  const [enable, setEnable] = useState<boolean>(true)
 
-  const applyClockEdge = () => {
-    const newQ: 0 | 1 = resetPressed ? 0 : dInput
-    setQHistory((prev) => [...prev, newQ])
-    setDHistory((prev) => [...prev.slice(-4), dInput])
-    setStepCount((s) => s + 1)
-    setResetAtCycle(-1)
-  }
-
-  const applyReset = () => {
-    setResetPressed(true)
-    setResetAtCycle(dHistory.length)
-    setQHistory((prev) => [...prev, 0])
-    setDHistory((prev) => [...prev.slice(-4), dInput])
-    setTimeout(() => setResetPressed(false), 500)
-  }
-
-  const handleReset = () => {
-    setDInput(0)
-    setResetPressed(false)
-    setDHistory([0, 0, 0, 0, 0])
-    setQHistory([0])
-    setStepCount(0)
-    setResetAtCycle(-1)
-  }
-
-  const waveformData = useMemo(() =>
-    generateWaveform(dHistory.slice(-6), resetAtCycle === -1 ? 99 : Math.max(0, dHistory.length - resetAtCycle - 1)),
-    [dHistory, resetAtCycle],
+  // Outputs & History
+  const [qState, setQState] = useState<0 | 1>(0)
+  const [prevQState, setPrevQState] = useState<0 | 1>(0)
+  const [history, setHistory] = useState<Array<{ clk: number; input1: number; input2: number; q: number }>>([
+    { clk: 0, input1: 1, input2: 0, q: 0 },
+  ])
+  const [lastActionExplanation, setLastActionExplanation] = useState<string>(
+    'Initial state: Q=0. Set inputs and click "Apply Clock Edge".'
   )
 
-  const timingSteps: TimingStep[] = [
-    { clock: '↑ edge 1', d: dHistory[0] ?? 0, q: qHistory[1] ?? 0, qbar: (qHistory[1] ?? 0) ^ 1, explanation: `Q captured D=${dHistory[0] ?? 0} on rising clock edge.` },
-    { clock: '↑ edge 2', d: dHistory[1] ?? 0, q: qHistory[2] ?? 0, qbar: (qHistory[2] ?? 0) ^ 1, explanation: `Q captured D=${dHistory[1] ?? 0} on rising clock edge.` },
-    { clock: '↑ edge 3', d: dHistory[2] ?? 0, q: qHistory[3] ?? 0, qbar: (qHistory[3] ?? 0) ^ 1, explanation: `Q captured D=${dHistory[2] ?? 0} on rising clock edge.` },
-  ]
+  const qBarState: 0 | 1 = (qState ^ 1) as 0 | 1
+
+  const handleApplyClock = () => {
+    setPrevQState(qState)
+    let nextQ: 0 | 1 = qState
+    let explanation = ''
+
+    if (reset) {
+      nextQ = 0
+      explanation = 'RESET active → Q forced to 0 immediately.'
+    } else if (!enable) {
+      nextQ = qState
+      explanation = 'ENABLE inactive → Clock edge ignored, Q holds previous state.'
+    } else {
+      if (ffType === 'D') {
+        nextQ = inputVal1
+        explanation = `D = ${inputVal1}: Q captures D on active clock edge → Q becomes ${nextQ}.`
+      } else if (ffType === 'JK') {
+        if (inputVal1 === 0 && inputVal2 === 0) {
+          nextQ = qState
+          explanation = 'J=0, K=0 → HOLD mode: Q maintains current state.'
+        } else if (inputVal1 === 0 && inputVal2 === 1) {
+          nextQ = 0
+          explanation = 'J=0, K=1 → RESET mode: Q becomes 0.'
+        } else if (inputVal1 === 1 && inputVal2 === 0) {
+          nextQ = 1
+          explanation = 'J=1, K=0 → SET mode: Q becomes 1.'
+        } else {
+          nextQ = (qState ^ 1) as 0 | 1
+          explanation = `J=1, K=1 → TOGGLE mode: Q toggles from ${qState} to ${nextQ}.`
+        }
+      } else if (ffType === 'T') {
+        if (inputVal1 === 0) {
+          nextQ = qState
+          explanation = 'T=0 → HOLD mode: Q maintains current state.'
+        } else {
+          nextQ = (qState ^ 1) as 0 | 1
+          explanation = `T=1 → TOGGLE mode: Q toggles from ${qState} to ${nextQ}.`
+        }
+      }
+    }
+
+    setQState(nextQ)
+    setLastActionExplanation(explanation)
+    setHistory((prev) => [
+      ...prev.slice(-5),
+      { clk: 1, input1: inputVal1, input2: inputVal2, q: nextQ },
+    ])
+  }
+
+  const handleResetLab = () => {
+    setQState(0)
+    setPrevQState(0)
+    setInputVal1(1)
+    setInputVal2(0)
+    setReset(false)
+    setEnable(true)
+    setHistory([{ clk: 0, input1: 1, input2: 0, q: 0 }])
+    setLastActionExplanation('Lab reset. Initial state: Q=0.')
+  }
+
+  const waveformPoints = useMemo(() => generateWaveform(history), [history])
 
   return (
     <section className="section flipflop-lab-section" id="flipflop-lab">
-      <div className="section-heading">
-        <p className="section-eyebrow">Interactive Lab</p>
-        <h2>D Flip-Flop Lab — Timing & Behavior</h2>
-        <p className="section-description">
-          Simulate a D flip-flop. Set D input, trigger clock edges, observe Q and Q̄. Watch the timing waveform update in real time.
-        </p>
+      <LabHeader
+        title="Flip-Flop Learning & Simulation Lab"
+        subtitle="Explore D, JK, and T Flip-Flops, clock edge sampling, waveforms, and setup/hold timing."
+        icon="⚡"
+        difficulty="Beginner"
+        mode={mode}
+        onModeChange={setMode}
+        onReset={handleResetLab}
+      />
+
+      {/* FF Selector */}
+      <div className="ff-type-selector-bar">
+        <span className="eyebrow">Select Flip-Flop Topology:</span>
+        <div className="ff-type-buttons">
+          <button
+            type="button"
+            className={`button secondary ${ffType === 'D' ? 'active' : ''}`}
+            onClick={() => { setFfType('D'); handleResetLab(); }}
+          >
+            [D] D Flip-Flop (Data)
+          </button>
+          <button
+            type="button"
+            className={`button secondary ${ffType === 'JK' ? 'active' : ''}`}
+            onClick={() => { setFfType('JK'); handleResetLab(); }}
+          >
+            [JK] JK Flip-Flop (Set/Reset/Toggle)
+          </button>
+          <button
+            type="button"
+            className={`button secondary ${ffType === 'T' ? 'active' : ''}`}
+            onClick={() => { setFfType('T'); handleResetLab(); }}
+          >
+            [T] T Flip-Flop (Toggle)
+          </button>
+        </div>
       </div>
 
-      <div className="ff-lab-grid">
-        <div className="ff-controls-panel">
-          <div className="ff-circuit-display">
-            <div className="ff-circuit-svg-wrap">
-              <svg viewBox="0 0 280 160" className="ff-circuit-svg" aria-label="D flip-flop circuit">
-                {/* FF body */}
-                <rect x="90" y="40" width="100" height="80" rx="8" fill="#0B172A" stroke="#2563EB" strokeWidth="2"/>
-                <text x="140" y="85" textAnchor="middle" fill="#F8FAFC" fontSize="14" fontWeight="700">D-FF</text>
-                {/* Labels inside */}
-                <text x="100" y="65" fill="#94A3B8" fontSize="10">D</text>
-                <text x="100" y="105" fill="#94A3B8" fontSize="10">CLK</text>
-                <text x="175" y="65" textAnchor="end" fill="#94A3B8" fontSize="10">Q</text>
-                <text x="175" y="105" textAnchor="end" fill="#94A3B8" fontSize="10">Q̄</text>
-                {/* D input wire */}
-                <line x1="20" y1="60" x2="90" y2="60" stroke={dInput ? '#2563EB' : '#1E3A8A'} strokeWidth="2"/>
-                <text x="12" y="64" fill="#F8FAFC" fontSize="11" fontWeight="600">D</text>
-                <circle cx="20" cy="60" r="10" fill={dInput ? '#2563EB' : '#1E3A8A'} />
-                <text x="20" y="64" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{dInput}</text>
-                {/* CLK wire */}
-                <line x1="20" y1="100" x2="90" y2="100" stroke="#94A3B8" strokeWidth="2" strokeDasharray="4,2"/>
-                <text x="8" y="104" fill="#94A3B8" fontSize="9">CLK</text>
-                {/* Q output wire */}
-                <line x1="190" y1="60" x2="260" y2="60" stroke={currentQ ? '#22C55E' : '#1E3A8A'} strokeWidth="2"/>
-                <circle cx="260" cy="60" r="10" fill={currentQ ? '#22C55E' : '#1E3A8A'} />
-                <text x="260" y="64" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{currentQ}</text>
-                <text x="270" y="64" fill="#F8FAFC" fontSize="11" fontWeight="600">Q</text>
-                {/* Qbar output wire */}
-                <line x1="190" y1="100" x2="260" y2="100" stroke={currentQbar ? '#EF4444' : '#1E3A8A'} strokeWidth="2"/>
-                <circle cx="260" cy="100" r="10" fill={currentQbar ? '#EF4444' : '#1E3A8A'} />
-                <text x="260" y="104" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{currentQbar}</text>
-                <text x="272" y="104" fill="#F8FAFC" fontSize="11" fontWeight="600">Q̄</text>
+      <div className="ff-lab-main-grid">
+        {/* Left Column: Circuit & Controls */}
+        <div className="ff-left-col">
+          <div className="ff-circuit-card">
+            <h4>Circuit Diagram & Live Pin States</h4>
+            <div className="ff-svg-wrap">
+              <svg viewBox="0 0 320 180" className="ff-svg">
+                <rect x="100" y="40" width="120" height="100" rx="8" fill="#0B172A" stroke="#2563EB" strokeWidth="2" />
+                <text x="160" y="95" textAnchor="middle" fill="#F8FAFC" fontSize="16" fontWeight="800">
+                  {ffType}-FF
+                </text>
+
+                {/* Input 1 */}
+                <line x1="20" y1="60" x2="100" y2="60" stroke={inputVal1 ? '#2563EB' : '#475569'} strokeWidth="2" />
+                <circle cx="20" cy="60" r="10" fill={inputVal1 ? '#2563EB' : '#334155'} />
+                <text x="20" y="64" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{inputVal1}</text>
+                <text x="10" y="46" fill="#F8FAFC" fontSize="11" fontWeight="700">{ffType === 'JK' ? 'J' : ffType === 'T' ? 'T' : 'D'}</text>
+
+                {/* Input 2 (JK only) */}
+                {ffType === 'JK' && (
+                  <>
+                    <line x1="20" y1="120" x2="100" y2="120" stroke={inputVal2 ? '#2563EB' : '#475569'} strokeWidth="2" />
+                    <circle cx="20" cy="120" r="10" fill={inputVal2 ? '#2563EB' : '#334155'} />
+                    <text x="20" y="124" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{inputVal2}</text>
+                    <text x="10" y="138" fill="#F8FAFC" fontSize="11" fontWeight="700">K</text>
+                  </>
+                )}
+
+                {/* CLK */}
+                <path d="M 100 85 L 112 90 L 100 95" fill="none" stroke="#94A3B8" strokeWidth="2" />
+                <line x1="20" y1="90" x2="100" y2="90" stroke="#94A3B8" strokeWidth="2" strokeDasharray="3,2" />
+                <text x="10" y="94" fill="#94A3B8" fontSize="9" fontWeight="700">CLK</text>
+
+                {/* Output Q */}
+                <line x1="220" y1="60" x2="300" y2="60" stroke={qState ? '#22C55E' : '#475569'} strokeWidth="2" />
+                <circle cx="300" cy="60" r="10" fill={qState ? '#22C55E' : '#334155'} />
+                <text x="300" y="64" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{qState}</text>
+                <text x="310" y="64" fill="#F8FAFC" fontSize="11" fontWeight="700">Q</text>
+
+                {/* Output Qbar */}
+                <line x1="220" y1="120" x2="300" y2="120" stroke={qBarState ? '#EF4444' : '#475569'} strokeWidth="2" />
+                <circle cx="300" cy="120" r="10" fill={qBarState ? '#EF4444' : '#334155'} />
+                <text x="300" y="124" textAnchor="middle" fill="white" fontSize="10" fontWeight="700">{qBarState}</text>
+                <text x="310" y="124" fill="#F8FAFC" fontSize="11" fontWeight="700">Q̄</text>
               </svg>
             </div>
-
-            <div className="ff-state-display">
-              <div className="ff-state-item">
-                <span className="ff-state-label">Current Q</span>
-                <div className={`ff-state-value ${currentQ ? 'high' : 'low'}`}>{currentQ}</div>
-              </div>
-              <div className="ff-state-item">
-                <span className="ff-state-label">Q̄</span>
-                <div className={`ff-state-value ${currentQbar ? 'high' : 'low'}`}>{currentQbar}</div>
-              </div>
-              <div className="ff-state-item">
-                <span className="ff-state-label">D Input</span>
-                <div className={`ff-state-value ${dInput ? 'high' : 'low'}`}>{dInput}</div>
-              </div>
-              <div className="ff-state-item">
-                <span className="ff-state-label">Cycles</span>
-                <div className="ff-state-value neutral">{stepCount}</div>
-              </div>
-            </div>
           </div>
 
-          <div className="ff-buttons-panel">
-            <div className="ff-input-group">
-              <span className="ff-label">Set D Input</span>
-              <div className="ff-toggle-row">
-                <button type="button" className={`ff-toggle ${dInput === 0 ? 'active-low' : ''}`} onClick={() => setDInput(0)}>D = 0</button>
-                <button type="button" className={`ff-toggle ${dInput === 1 ? 'active-high' : ''}`} onClick={() => setDInput(1)}>D = 1</button>
+          <div className="ff-controls-card">
+            <h4>Signal Controls</h4>
+            <div className="ff-inputs-row">
+              {/* Primary Input */}
+              <div className="ff-ctrl-group">
+                <span className="ctrl-label">{ffType === 'JK' ? 'J Input' : ffType === 'T' ? 'T Input' : 'D Input'}</span>
+                <div className="btn-group">
+                  <button type="button" className={`button small ${inputVal1 === 0 ? 'secondary active' : 'secondary'}`} onClick={() => setInputVal1(0)}>0</button>
+                  <button type="button" className={`button small ${inputVal1 === 1 ? 'primary' : 'secondary'}`} onClick={() => setInputVal1(1)}>1</button>
+                </div>
+              </div>
+
+              {/* Secondary Input for JK */}
+              {ffType === 'JK' && (
+                <div className="ff-ctrl-group">
+                  <span className="ctrl-label">K Input</span>
+                  <div className="btn-group">
+                    <button type="button" className={`button small ${inputVal2 === 0 ? 'secondary active' : 'secondary'}`} onClick={() => setInputVal2(0)}>0</button>
+                    <button type="button" className={`button small ${inputVal2 === 1 ? 'primary' : 'secondary'}`} onClick={() => setInputVal2(1)}>1</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Enable Toggle */}
+              <div className="ff-ctrl-group">
+                <span className="ctrl-label">Enable</span>
+                <button type="button" className={`button small ${enable ? 'success' : 'secondary'}`} onClick={() => setEnable(!enable)}>
+                  {enable ? 'ENABLED' : 'DISABLED'}
+                </button>
+              </div>
+
+              {/* Reset Toggle */}
+              <div className="ff-ctrl-group">
+                <span className="ctrl-label">Reset (Async)</span>
+                <button type="button" className={`button small ${reset ? 'danger' : 'secondary'}`} onClick={() => setReset(!reset)}>
+                  {reset ? 'RESET HIGH' : 'RESET LOW'}
+                </button>
               </div>
             </div>
 
-            <div className="ff-input-group">
-              <span className="ff-label">Clock Control</span>
-              <div className="ff-clock-buttons">
-                <button type="button" className="button primary" onClick={applyClockEdge} id="ff-clock-btn">
-                  ↑ Rising Edge
-                </button>
-                <button type="button" className="button warning" onClick={applyReset} id="ff-reset-btn">
-                  RST
-                </button>
-                <button type="button" className="button secondary" onClick={handleReset} id="ff-clear-btn">
-                  Clear
-                </button>
-              </div>
+            <div className="ff-action-bar">
+              <button type="button" className="button primary large-btn" onClick={handleApplyClock}>
+                ⚡ Apply Clock Rising Edge
+              </button>
             </div>
-          </div>
 
-          <div className="ff-explanation">
-            <h4>What Just Happened?</h4>
-            <p>
-              The D flip-flop samples input D at the <strong>rising clock edge</strong>. At that instant, Q takes the value of D.
-              Between clock edges, Q holds its value — D changes have no effect until the next rising edge.
-            </p>
-            <p>
-              Q̄ is always the complement of Q. When Q=1, Q̄=0 and vice versa.
-            </p>
-            {resetPressed && (
-              <p className="reset-note">⚡ RESET applied — Q forced to 0 regardless of D.</p>
-            )}
+            <div className="ff-action-explanation">
+              <strong>Step Explanation:</strong> {lastActionExplanation}
+            </div>
           </div>
         </div>
 
-        <div className="ff-waveform-panel">
-          <h4>Timing Waveform</h4>
-          <div className="waveform-container">
-            <WaveformDisplay points={waveformData} width={360} />
+        {/* Right Column: Metrics & Waveform */}
+        <div className="ff-right-col">
+          <div className="ff-metrics-grid">
+            <MetricCard label="Current State Q" value={qState} status={qState ? 'good' : 'neutral'} />
+            <MetricCard label="Complement Q̄" value={qBarState} status={qBarState ? 'danger' : 'neutral'} />
+            <MetricCard label="Previous Q" value={prevQState} status="neutral" />
+            <MetricCard label="Active Topology" value={`${ffType}-FF`} status="good" />
           </div>
 
-          <div className="ff-timing-table">
-            <h4>Clock Edge History</h4>
-            <table className="truth-table">
-              <thead>
-                <tr><th>Clock Edge</th><th>D</th><th>Q (before)</th><th>Q (after)</th><th>Explanation</th></tr>
-              </thead>
-              <tbody>
-                {timingSteps.map((step, i) => (
-                  <tr key={i}>
-                    <td>{step.clock}</td>
-                    <td className={step.d ? 'high-cell' : 'low-cell'}>{step.d}</td>
-                    <td>{i > 0 ? timingSteps[i - 1].q : 0}</td>
-                    <td className={step.q ? 'high-cell' : 'low-cell'}>{step.q}</td>
-                    <td>{step.explanation}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="ff-waveform-card">
+            <h4>Live Waveform Generator</h4>
+            <div className="waveform-box">
+              <svg viewBox="0 0 320 120" className="waveform-svg">
+                {/* Draw CLK, Input1, Q */}
+                <text x="5" y="25" fill="#94A3B8" fontSize="10">CLK</text>
+                <text x="5" y="65" fill="#38BDF8" fontSize="10">{ffType === 'JK' ? 'J' : ffType === 'T' ? 'T' : 'D'}</text>
+                <text x="5" y="105" fill="#4ADE80" fontSize="10">Q</text>
+                {waveformPoints.map((p, i) => {
+                  const x = (p.t / 240) * 300 + 35
+                  return (
+                    <g key={i}>
+                      {i > 0 && (
+                        <>
+                          {/* CLK */}
+                          <line
+                            x1={(waveformPoints[i - 1].t / 240) * 300 + 35}
+                            y1={waveformPoints[i - 1].clk ? 15 : 30}
+                            x2={x}
+                            y2={p.clk ? 15 : 30}
+                            stroke="#94A3B8" strokeWidth="1.5"
+                          />
+                          {/* Input */}
+                          <line
+                            x1={(waveformPoints[i - 1].t / 240) * 300 + 35}
+                            y1={waveformPoints[i - 1].input1 ? 55 : 70}
+                            x2={x}
+                            y2={p.input1 ? 55 : 70}
+                            stroke="#38BDF8" strokeWidth="1.5"
+                          />
+                          {/* Q */}
+                          <line
+                            x1={(waveformPoints[i - 1].t / 240) * 300 + 35}
+                            y1={waveformPoints[i - 1].q ? 95 : 110}
+                            x2={x}
+                            y2={p.q ? 95 : 110}
+                            stroke="#4ADE80" strokeWidth="2"
+                          />
+                        </>
+                      )}
+                    </g>
+                  )
+                })}
+              </svg>
+            </div>
           </div>
 
-          <button
-            type="button"
-            className="notes-toggle-btn"
-            onClick={() => setShowSetupHold(!showSetupHold)}
-          >
-            {showSetupHold ? '▲ Hide' : '▼ Show'} Setup & Hold Time Explanation
-          </button>
-
-          {showSetupHold && (
-            <div className="setup-hold-explainer">
-              <h4>Setup Time & Hold Time</h4>
-              <div className="timing-diagram-text">
-                <div className="timing-row">
-                  <span className="timing-label">CLK:</span>
-                  <span className="timing-bar clk-bar">___|‾‾‾|___</span>
-                </div>
-                <div className="timing-row">
-                  <span className="timing-label">D:</span>
-                  <span className="timing-bar d-bar">must be stable: [←tsu→↑←th→]</span>
-                </div>
-              </div>
-              <div className="setup-hold-table">
-                <div className="sh-row">
-                  <div className="sh-name">Setup Time (tsu)</div>
-                  <div className="sh-desc">D must be stable BEFORE the clock edge by at least tsu. Typical: 30–100ps in 28nm.</div>
-                  <div className="sh-violation">Violation: D changes too close to clock → Q may capture wrong value.</div>
-                </div>
-                <div className="sh-row">
-                  <div className="sh-name">Hold Time (th)</div>
-                  <div className="sh-desc">D must remain stable AFTER the clock edge by at least th. Typical: 10–50ps.</div>
-                  <div className="sh-violation">Violation: D changes too soon after clock → metastability or wrong capture.</div>
-                </div>
-                <div className="sh-row">
-                  <div className="sh-name">Clock-to-Q (tCQ)</div>
-                  <div className="sh-desc">Time from clock edge to Q becoming valid. Typical: 100–200ps. Contributes to path delay.</div>
-                  <div className="sh-violation">This delay is the starting point for all STA data arrival time calculations.</div>
-                </div>
-              </div>
+          {/* Mode-specific explanations */}
+          {mode === 'ENGINEERING' ? (
+            <EquationBreakdown
+              title="Setup & Hold Timing Checks"
+              formula="t_CQ + t_logic + t_wire ≤ T_clk − t_su"
+              variables={[
+                { symbol: 't_su', name: 'Setup Time', value: 0.05, unit: 'ns' },
+                { symbol: 't_h', name: 'Hold Time', value: 0.02, unit: 'ns' },
+                { symbol: 't_CQ', name: 'Clock-to-Q Delay', value: 0.15, unit: 'ns' },
+                { symbol: 'T_clk', name: 'Clock Period', value: 2.0, unit: 'ns' },
+              ]}
+              substitution="DAT = 0.15 + 1.25 + 0.10 = 1.50ns, DRT = 2.00 − 0.05 = 1.95ns"
+              calculation="Setup Slack = DRT − DAT = 1.95ns − 1.50ns"
+              result="+0.45 ns (Timing PASS ✓)"
+              physicalMeaning="Setup time requires data to settle BEFORE the clock edge. Hold time requires data to remain stable AFTER the clock edge. Violations cause metastability."
+            />
+          ) : (
+            <div className="learning-panel-box">
+              <h4>🎓 What Did I Learn?</h4>
+              <ul>
+                <li><strong>Edge Triggering:</strong> Flip-flops update output ONLY on the rising/falling clock edge.</li>
+                <li><strong>D Flip-Flop:</strong> Q takes D value directly on clock edge.</li>
+                <li><strong>JK Flip-Flop:</strong> J=0,K=0 (Hold), J=0,K=1 (Reset), J=1,K=0 (Set), J=1,K=1 (Toggle).</li>
+                <li><strong>T Flip-Flop:</strong> T=0 (Hold), T=1 (Toggle).</li>
+              </ul>
             </div>
           )}
         </div>
       </div>
+
+      {/* Lab Challenges */}
+      <ChallengeCard labId="flipflop" challenges={ffChallenges} />
     </section>
   )
 }

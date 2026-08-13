@@ -1,351 +1,339 @@
 import { useMemo, useState } from 'react'
+import { LabHeader, type Mode } from './labs/LabHeader'
+import { MetricCard } from './labs/MetricCard'
+import { EquationBreakdown } from './labs/EquationBreakdown'
+import { ChallengeCard, type Challenge } from './labs/ChallengeCard'
 
-type GateId = 'AND' | 'OR' | 'NOT' | 'NAND' | 'NOR' | 'XOR'
+type GateId = 'AND' | 'OR' | 'NOT' | 'NAND' | 'NOR' | 'XOR' | 'XNOR'
 
 type GateInfo = {
   id: GateId
   title: string
   expression: string
   summary: string
-  importance: string
-  usage: string
+  truthTable: { a: number; b?: number; y: number }[]
+  evalFn: (a: number, b: number) => number
 }
 
 const gateDefinitions: GateInfo[] = [
   {
     id: 'AND',
-    title: 'AND',
+    title: 'AND Gate',
     expression: 'Y = A · B',
-    summary: 'Output is HIGH only when both inputs are HIGH.',
-    importance: 'AND gates are used to enforce that multiple signals must be true before a circuit path activates.',
-    usage: 'Common in arithmetic logic, control conditions, and enable signals.',
+    summary: 'Output is 1 ONLY when both inputs A and B are 1.',
+    truthTable: [
+      { a: 0, b: 0, y: 0 },
+      { a: 0, b: 1, y: 0 },
+      { a: 1, b: 0, y: 0 },
+      { a: 1, b: 1, y: 1 },
+    ],
+    evalFn: (a, b) => a & b,
   },
   {
     id: 'OR',
-    title: 'OR',
+    title: 'OR Gate',
     expression: 'Y = A + B',
-    summary: 'Output is HIGH when either input is HIGH.',
-    importance: 'OR gates let a circuit respond to any one of several true conditions.',
-    usage: 'Used in interrupt logic, decision trees, and combining signals.',
+    summary: 'Output is 1 when either input A or B is 1.',
+    truthTable: [
+      { a: 0, b: 0, y: 0 },
+      { a: 0, b: 1, y: 1 },
+      { a: 1, b: 0, y: 1 },
+      { a: 1, b: 1, y: 1 },
+    ],
+    evalFn: (a, b) => a | b,
   },
   {
     id: 'NOT',
-    title: 'NOT',
-    expression: 'Y = ¬A',
-    summary: 'Output is the inverse of the input A.',
-    importance: 'NOT gates provide signal inversion and are essential for complements in logic design.',
-    usage: 'Used in inverters, gated logic, and timing control signals.',
+    title: 'NOT Gate (Inverter)',
+    expression: 'Y = Ā',
+    summary: 'Output is the inverse of input A.',
+    truthTable: [
+      { a: 0, y: 1 },
+      { a: 1, y: 0 },
+    ],
+    evalFn: (a) => (a === 0 ? 1 : 0),
   },
   {
     id: 'NAND',
-    title: 'NAND',
-    expression: 'Y = ¬(A · B)',
-    summary: 'Output is LOW only when both inputs are HIGH.',
-    importance: 'NAND gates are universal and can be used to build any logic function.',
-    usage: 'Found in memory cells, latch elements, and custom logic modules.',
+    title: 'NAND Gate (Universal)',
+    expression: 'Y = (A · B)̄',
+    summary: 'Output is 0 ONLY when both inputs A and B are 1. Universal gate.',
+    truthTable: [
+      { a: 0, b: 0, y: 1 },
+      { a: 0, b: 1, y: 1 },
+      { a: 1, b: 0, y: 1 },
+      { a: 1, b: 1, y: 0 },
+    ],
+    evalFn: (a, b) => (a & b ? 0 : 1),
   },
   {
     id: 'NOR',
-    title: 'NOR',
-    expression: 'Y = ¬(A + B)',
-    summary: 'Output is HIGH only when both inputs are LOW.',
-    importance: 'NOR gates are also universal and are used for compact logic implementation.',
-    usage: 'Used in control circuits, reset logic, and simple decision blocks.',
+    title: 'NOR Gate (Universal)',
+    expression: 'Y = (A + B)̄',
+    summary: 'Output is 1 ONLY when both inputs A and B are 0. Universal gate.',
+    truthTable: [
+      { a: 0, b: 0, y: 1 },
+      { a: 0, b: 1, y: 0 },
+      { a: 1, b: 0, y: 0 },
+      { a: 1, b: 1, y: 0 },
+    ],
+    evalFn: (a, b) => (a | b ? 0 : 1),
   },
   {
     id: 'XOR',
-    title: 'XOR',
+    title: 'XOR Gate (Exclusive-OR)',
     expression: 'Y = A ⊕ B',
-    summary: 'Output is HIGH when inputs are different.',
-    importance: 'XOR gates are essential for arithmetic operations and parity checks.',
-    usage: 'Used in adders, comparators, and error detection logic.',
+    summary: 'Output is 1 when inputs A and B are DIFFERENT.',
+    truthTable: [
+      { a: 0, b: 0, y: 0 },
+      { a: 0, b: 1, y: 1 },
+      { a: 1, b: 0, y: 1 },
+      { a: 1, b: 1, y: 0 },
+    ],
+    evalFn: (a, b) => a ^ b,
+  },
+  {
+    id: 'XNOR',
+    title: 'XNOR Gate (Equivalence)',
+    expression: 'Y = (A ⊕ B)̄',
+    summary: 'Output is 1 when inputs A and B are EQUAL.',
+    truthTable: [
+      { a: 0, b: 0, y: 1 },
+      { a: 0, b: 1, y: 0 },
+      { a: 1, b: 0, y: 0 },
+      { a: 1, b: 1, y: 1 },
+    ],
+    evalFn: (a, b) => (a ^ b ? 0 : 1),
   },
 ]
 
-const truthRows = (gateId: GateId) => {
-  if (gateId === 'NOT') {
-    return [
-      { a: 0, b: null, y: 1 },
-      { a: 1, b: null, y: 0 },
-    ]
-  }
+const logicChallenges: Challenge[] = [
+  {
+    id: 'dl-c1',
+    title: 'Challenge 1: De Morgan\'s NAND Equivalence',
+    question: 'According to De Morgan\'s theorem, the NAND expression Y = (A · B)̄ is logically equivalent to which OR expression?',
+    options: ['Y = Ā + B̄', 'Y = Ā · B̄', 'Y = A + B', 'Y = A ⊕ B'],
+    correctAnswer: 'Y = Ā + B̄',
+    hint: 'De Morgan\'s Law: (A · B)̄ = Ā + B̄.',
+    solution: 'Y = Ā + B̄',
+    explanation: 'De Morgan\'s theorem states that the complement of a product is equal to the sum of the complements.',
+  },
+  {
+    id: 'dl-c2',
+    title: 'Challenge 2: Constructing XOR using NAND Gates',
+    question: 'How many 2-input NAND gates are required to construct a 2-input XOR function (Y = A ⊕ B)?',
+    options: ['2', '3', '4', '5'],
+    correctAnswer: '4',
+    hint: 'XOR = NAND( NAND(A, NAND(A,B)), NAND(B, NAND(A,B)) ). Count the total NAND gates.',
+    solution: '4 NAND gates',
+    explanation: '4 NAND gates are required to implement XOR: 1 central NAND + 2 branch NANDs + 1 output NAND.',
+  },
+  {
+    id: 'dl-c3',
+    title: 'Challenge 3: Universal Gate Identity',
+    question: 'Why are NAND and NOR gates called "Universal Gates" in VLSI design?',
+    options: [
+      'Any Boolean logic function can be constructed using exclusively NAND (or exclusively NOR) gates.',
+      'They operate at zero voltage.',
+      'They have infinite drive strength.',
+      'They require no transistors.',
+    ],
+    correctAnswer: 'Any Boolean logic function can be constructed using exclusively NAND (or exclusively NOR) gates.',
+    hint: 'Universal gates can create AND, OR, NOT, XOR functions entirely on their own.',
+    solution: 'Can construct any Boolean function',
+    explanation: 'NAND and NOR are universal because any logic gate or digital circuit can be built using only NANDs or only NORs.',
+  },
+]
 
-  return [
-    { a: 0, b: 0, y: calculateOutput(gateId, 0, 0) },
-    { a: 0, b: 1, y: calculateOutput(gateId, 0, 1) },
-    { a: 1, b: 0, y: calculateOutput(gateId, 1, 0) },
-    { a: 1, b: 1, y: calculateOutput(gateId, 1, 1) },
-  ]
-}
+export default function DigitalLogicLab() {
+  const [mode, setMode] = useState<Mode>('LEARNING')
+  const [selectedGateId, setSelectedGateId] = useState<GateId>('AND')
+  const [inputA, setInputA] = useState<number>(1)
+  const [inputB, setInputB] = useState<number>(0)
 
-const calculateOutput = (gateId: GateId, a: 0 | 1, b: 0 | 1) => {
-  switch (gateId) {
-    case 'AND':
-      return a & b
-    case 'OR':
-      return a | b
-    case 'NOT':
-      return a ? 0 : 1
-    case 'NAND':
-      return (a & b) ? 0 : 1
-    case 'NOR':
-      return a || b ? 0 : 1
-    case 'XOR':
-      return a ^ b
-    default:
-      return 0
-  }
-}
+  // Custom Build Logic Challenge State
+  const [buildNandCount, setBuildNandCount] = useState<number>(0)
+  const [buildFeedback, setBuildFeedback] = useState<string | null>(null)
 
-const calculateStep = (gateId: GateId, a: 0 | 1, b: 0 | 1) => {
-  const output = calculateOutput(gateId, a, b)
-  if (gateId === 'NOT') {
-    return [`A = ${a}`, `¬A = ${output}`, `Therefore: OUTPUT = ${output}`]
-  }
-
-  const symbol =
-    gateId === 'AND'
-      ? '·'
-      : gateId === 'OR'
-      ? '+'
-      : gateId === 'XOR'
-      ? '⊕'
-      : gateId === 'NAND' || gateId === 'NOR'
-      ? gateId === 'NAND'
-        ? '·'
-        : '+'
-      : ''
-
-  const operation = `${a} ${symbol} ${b}`
-  if (gateId === 'NAND') {
-    const intermediate = a & b
-    return [`A · B = ${intermediate}`, `¬(${intermediate}) = ${output}`, `Therefore: OUTPUT = ${output}`]
-  }
-
-  if (gateId === 'NOR') {
-    const intermediate = a || b ? 1 : 0
-    return [`A + B = ${intermediate}`, `¬(${intermediate}) = ${output}`, `Therefore: OUTPUT = ${output}`]
-  }
-
-  return [`${operation} = ${output}`, `Therefore: OUTPUT = ${output}`]
-}
-
-const gateDescription = (gateId: GateId, a: 0 | 1, b: 0 | 1) => {
-  if (gateId === 'NOT') {
-    return `The NOT gate inverts the input. When A is ${a}, output becomes ${a ? '0' : '1'}.`
-  }
-
-  return `The ${gateId} gate reads A = ${a} and B = ${b}, and the output becomes ${calculateOutput(gateId, a, b)}.`
-}
-
-function DigitalLogicLab() {
-  const [gateId, setGateId] = useState<GateId>('AND')
-  const [inputA, setInputA] = useState<0 | 1>(0)
-  const [inputB, setInputB] = useState<0 | 1>(0)
-  const [prediction, setPrediction] = useState<'0' | '1' | ''>('')
-
-  const gateInfo = useMemo(
-    () => gateDefinitions.find((gate) => gate.id === gateId) as GateInfo,
-    [gateId],
+  const activeGate = useMemo(
+    () => gateDefinitions.find((g) => g.id === selectedGateId) || gateDefinitions[0],
+    [selectedGateId]
   )
 
-  const output = useMemo(() => calculateOutput(gateId, inputA, inputB), [gateId, inputA, inputB])
-  const truthTable = useMemo(() => truthRows(gateId), [gateId])
-  const explanationLines = useMemo(() => calculateStep(gateId, inputA, inputB), [gateId, inputA, inputB])
-  const challengeMessage = useMemo(() => {
-    if (!prediction) {
-      return 'Predict the output before changing the inputs.'
-    }
-    const correct = prediction === `${output}`
-    return correct
-      ? `Correct! ${gateId} output is ${output}.` 
-      : `Not quite — ${gateId} output is ${output}.`
-  }, [gateId, output, prediction])
+  const outputY = activeGate.evalFn(inputA, inputB)
 
-  const handleGateSelect = (selected: GateId) => {
-    setGateId(selected)
-    setPrediction('')
-    setInputA(0)
+  const handleResetLab = () => {
+    setSelectedGateId('AND')
+    setInputA(1)
     setInputB(0)
+    setBuildNandCount(0)
+    setBuildFeedback(null)
+  }
+
+  const handleCheckBuildXor = () => {
+    if (buildNandCount === 4) {
+      setBuildFeedback('✓ Correct! 4 NAND gates successfully form a 2-input XOR function.')
+    } else {
+      setBuildFeedback(`✕ Incorrect count (${buildNandCount}). 4 NAND gates are needed for XOR.`)
+    }
   }
 
   return (
     <section className="section digital-logic-section" id="digital-logic">
-      <div className="section-heading">
-        <p className="section-eyebrow">Digital Logic Visual Lab</p>
-        <h2>Explore gates with live input, output, and signal visualization</h2>
-        <p className="section-description">
-          Learn how each logic gate transforms inputs into output with clear diagrams, truth tables, and step-by-step reasoning.
-        </p>
+      <LabHeader
+        title="Interactive Digital Logic Gate Laboratory"
+        subtitle="Simulate AND, OR, NOT, NAND, NOR, XOR, and XNOR gates with live truth tables and logic construction challenges."
+        icon="🧩"
+        difficulty="Beginner"
+        mode={mode}
+        onModeChange={setMode}
+        onReset={handleResetLab}
+      />
+
+      <div className="logic-gate-selector-bar">
+        <span className="eyebrow">Select Gate Topology:</span>
+        <div className="btn-group">
+          {gateDefinitions.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              className={`button small ${selectedGateId === g.id ? 'primary' : 'secondary'}`}
+              onClick={() => setSelectedGateId(g.id)}
+            >
+              {g.id}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="digital-logic-grid">
-        <div className="digital-logic-panel">
-          <div className="digital-logic-panel-header">
-            <div>
-              <p className="eyebrow">Gate selection</p>
-              <h3>{gateInfo.title} Gate</h3>
+        {/* Left Column: Gate Symbol & Input Controls */}
+        <div className="dl-left-col">
+          <div className="dl-gate-symbol-card">
+            <h4>{activeGate.title} — Symbol & Logic Diagram</h4>
+
+            <div className="dl-svg-wrap">
+              <svg viewBox="0 0 300 160" className="dl-svg">
+                {/* Inputs */}
+                <line x1="20" y1="50" x2="100" y2="50" stroke={inputA ? '#2563EB' : '#475569'} strokeWidth="2.5" />
+                <circle cx="20" cy="50" r="8" fill={inputA ? '#2563EB' : '#334155'} />
+                <text x="20" y="35" fill="#F8FAFC" fontSize="10" fontWeight="700" textAnchor="middle">A = {inputA}</text>
+
+                {activeGate.id !== 'NOT' && (
+                  <>
+                    <line x1="20" y1="110" x2="100" y2="110" stroke={inputB ? '#2563EB' : '#475569'} strokeWidth="2.5" />
+                    <circle cx="20" cy="110" r="8" fill={inputB ? '#2563EB' : '#334155'} />
+                    <text x="20" y="128" fill="#F8FAFC" fontSize="10" fontWeight="700" textAnchor="middle">B = {inputB}</text>
+                  </>
+                )}
+
+                {/* Gate Shape */}
+                <rect x="100" y="35" width="100" height="90" rx="8" fill="#0B172A" stroke="#06B6D4" strokeWidth="2" />
+                <text x="150" y="85" fill="#F8FAFC" fontSize="16" fontWeight="800" textAnchor="middle">{activeGate.id}</text>
+
+                {/* Output Wire */}
+                <line x1="200" y1="80" x2="280" y2="80" stroke={outputY ? '#22C55E' : '#475569'} strokeWidth="2.5" />
+                <circle cx="280" cy="80" r="9" fill={outputY ? '#22C55E' : '#334155'} />
+                <text x="280" y="65" fill="#F8FAFC" fontSize="10" fontWeight="700" textAnchor="middle">Y = {outputY}</text>
+              </svg>
             </div>
-            <div className="gate-selector" role="tablist" aria-label="Select logic gate">
-              {gateDefinitions.map((gate) => (
-                <button
-                  key={gate.id}
-                  type="button"
-                  className={`gate-tab ${gate.id === gateId ? 'active' : ''}`}
-                  onClick={() => handleGateSelect(gate.id)}
-                >
-                  {gate.id}
+
+            <div className="dl-inputs-control-box">
+              <div className="ctrl-group">
+                <span className="ctrl-label">Input A:</span>
+                <button type="button" className={`button small ${inputA ? 'primary' : 'secondary'}`} onClick={() => setInputA(inputA ? 0 : 1)}>
+                  Toggle A ({inputA})
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div className="logic-inputs">
-            <div className="input-block">
-              <span>A</span>
-              <div className="logic-buttons">
-                {[0, 1].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={`button secondary ${inputA === value ? 'active' : ''}`}
-                    onClick={() => setInputA(value as 0 | 1)}
-                  >
-                    {value}
+              {activeGate.id !== 'NOT' && (
+                <div className="ctrl-group">
+                  <span className="ctrl-label">Input B:</span>
+                  <button type="button" className={`button small ${inputB ? 'primary' : 'secondary'}`} onClick={() => setInputB(inputB ? 0 : 1)}>
+                    Toggle B ({inputB})
                   </button>
-                ))}
-              </div>
-            </div>
-
-            {gateId !== 'NOT' && (
-              <div className="input-block">
-                <span>B</span>
-                <div className="logic-buttons">
-                  {[0, 1].map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`button secondary ${inputB === value ? 'active' : ''}`}
-                      onClick={() => setInputB(value as 0 | 1)}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="diagram-card">
-            <div className="diagram-heading">
-              <p className="eyebrow">Live gate diagram</p>
-              <p className="diagram-expression">{gateInfo.expression}</p>
-            </div>
-
-            <div className="logic-diagram">
-              <div className="signal-row">
-                <span className="signal-label">INPUT A</span>
-                <div className={`signal-path ${inputA === 1 ? 'active' : 'inactive'}`}>
-                  <span className={`signal-node ${inputA === 1 ? 'high' : 'low'}`}>{inputA}</span>
-                </div>
-              </div>
-
-              {gateId !== 'NOT' && (
-                <div className="signal-row second-input">
-                  <span className="signal-label">INPUT B</span>
-                  <div className={`signal-path ${inputB === 1 ? 'active' : 'inactive'}`}>
-                    <span className={`signal-node ${inputB === 1 ? 'high' : 'low'}`}>{inputB}</span>
-                  </div>
                 </div>
               )}
-
-              <div className={`gate-node ${output === 1 ? 'active' : ''}`}>
-                {gateInfo.title}
-              </div>
-
-              <div className="output-display">
-                <div>
-                  <span className="eyebrow">OUTPUT</span>
-                  <div className={`logic-badge ${output === 1 ? 'high' : 'low'}`}>{output}</div>
-                </div>
-                <div className="output-label">Signal flows through the gate to produce the result.</div>
-              </div>
             </div>
           </div>
 
-          <div className="analysis-card">
-            <h3>Step-by-step explanation</h3>
-            <ol className="explanation-list">
-              {explanationLines.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ol>
-          </div>
-
-          <div className="analysis-card challenge-panel">
-            <h3>Challenge mode</h3>
-            <p>Predict the output before changing the input, then check your answer.</p>
-            <div className="challenge-buttons">
-              {['0', '1'].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`button secondary ${prediction === value ? 'active' : ''}`}
-                  onClick={() => setPrediction(value as '0' | '1')}
-                >
-                  {value}
-                </button>
-              ))}
+          {/* Build the Logic Challenge Box */}
+          <div className="dl-build-challenge-card">
+            <h4>🔨 "Build the Logic" Challenge: XOR using NANDs</h4>
+            <p className="build-desc">Add 2-input NAND gates to construct a 2-input XOR function.</p>
+            <div className="build-action-row">
+              <button type="button" className="button secondary small" onClick={() => setBuildNandCount(buildNandCount + 1)}>
+                + Add NAND Gate ({buildNandCount})
+              </button>
+              <button type="button" className="button primary small" onClick={handleCheckBuildXor}>
+                Check Circuit
+              </button>
+              <button type="button" className="button secondary small" onClick={() => { setBuildNandCount(0); setBuildFeedback(null); }}>
+                Reset
+              </button>
             </div>
-            <p className={`challenge-feedback ${prediction === `${output}` ? 'correct' : prediction ? 'incorrect' : ''}`}>
-              {challengeMessage}
-            </p>
+            {buildFeedback && <div className="build-feedback-box">{buildFeedback}</div>}
           </div>
         </div>
 
-        <div className="digital-logic-sidebar">
-          <div className="analysis-card">
-            <h3>Truth table</h3>
+        {/* Right Column: Truth Table & Explanations */}
+        <div className="dl-right-col">
+          <div className="dl-metrics-grid">
+            <MetricCard label="Selected Gate" value={activeGate.id} status="good" />
+            <MetricCard label="Expression" value={activeGate.expression} status="warning" />
+            <MetricCard label="Output Y" value={outputY} status={outputY ? 'good' : 'neutral'} />
+          </div>
+
+          {/* Truth Table */}
+          <div className="dl-truth-table-card">
+            <h4>Live Truth Table</h4>
             <table className="truth-table">
               <thead>
                 <tr>
-                  <th>A</th>
-                  {gateId !== 'NOT' && <th>B</th>}
-                  <th>Y</th>
+                  <th>Input A</th>
+                  {activeGate.id !== 'NOT' && <th>Input B</th>}
+                  <th>Output Y</th>
                 </tr>
               </thead>
               <tbody>
-                {truthTable.map((row) => (
-                  <tr key={`${row.a}-${row.b ?? 'x'}`} className={row.a === inputA && row.b === (gateId !== 'NOT' ? inputB : null) ? 'active-row' : ''}>
-                    <td>{row.a}</td>
-                    {gateId !== 'NOT' && <td>{row.b}</td>}
-                    <td>{row.y}</td>
-                  </tr>
-                ))}
+                {activeGate.truthTable.map((row, idx) => {
+                  const isActive =
+                    row.a === inputA && (activeGate.id === 'NOT' || row.b === inputB)
+                  return (
+                    <tr key={idx} className={isActive ? 'active-row' : ''}>
+                      <td>{row.a}</td>
+                      {activeGate.id !== 'NOT' && <td>{row.b}</td>}
+                      <td className="highlight">{row.y}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
 
-          <div className="analysis-card">
-            <h3>Boolean expression</h3>
-            <p>{gateInfo.expression}</p>
-          </div>
-
-          <div className="analysis-card">
-            <h3>Learning mode</h3>
-            <p>{gateInfo.summary}</p>
-            <p><strong>Why it matters:</strong> {gateInfo.importance}</p>
-            <p><strong>Real use:</strong> {gateInfo.usage}</p>
-          </div>
-
-          <div className="analysis-card">
-            <h3>Current logic</h3>
-            <p>{gateDescription(gateId, inputA, inputB)}</p>
-          </div>
+          {mode === 'ENGINEERING' ? (
+            <EquationBreakdown
+              title="De Morgan's Laws & Boolean Equivalence"
+              formula="\overline{A \cdot B} = \bar{A} + \bar{B} \quad \text{and} \quad \overline{A + B} = \bar{A} \cdot \bar{B}"
+              variables={[
+                { symbol: 'A', name: 'Input Signal A', value: inputA, unit: 'binary' },
+                { symbol: 'B', name: 'Input Signal B', value: inputB, unit: 'binary' },
+              ]}
+              substitution={`NAND(${inputA}, ${inputB}) = NOT(${inputA}) OR NOT(${inputB})`}
+              calculation={`Y = ${outputY}`}
+              result={`Output Y = ${outputY}`}
+              physicalMeaning="De Morgan's laws allow synthesis tools to convert AND/OR networks into pure NAND/NOR CMOS implementations for optimal cell area."
+            />
+          ) : (
+            <div className="learning-panel-box">
+              <h4>🎓 Learning Summary</h4>
+              <p>{activeGate.summary}</p>
+            </div>
+          )}
         </div>
       </div>
+
+      <ChallengeCard labId="digitallogic" challenges={logicChallenges} />
     </section>
   )
 }
-
-export default DigitalLogicLab

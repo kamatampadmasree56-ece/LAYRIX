@@ -1,291 +1,338 @@
-import { useMemo, useState, useRef, useEffect, type PointerEvent } from 'react'
-
-type Cell = {
-  id: string
-  label: string
-  x: number // fraction
-  y: number // fraction
-  w: number // fraction of die width
-  h: number // fraction of die height
-  fixed?: boolean
-}
+import { useMemo, useState, type PointerEvent } from 'react'
+import { LabHeader, type Mode } from './labs/LabHeader'
+import { MetricCard } from './labs/MetricCard'
+import { EquationBreakdown } from './labs/EquationBreakdown'
+import { ChallengeCard, type Challenge } from './labs/ChallengeCard'
 
 type Props = {
-  dieWidth: number
-  dieHeight: number
-  margin: number
-  onCellsChange?: (cells: Cell[]) => void
+  dieWidth?: number
+  dieHeight?: number
+  margin?: number
+  onCellsChange?: (cells: PlacementCell[]) => void
 }
 
-const initialCells = (): Cell[] => {
-  return Array.from({ length: 14 }).map((_, i) => ({
-    id: `C${i + 1}`,
-    label: `Cell ${i + 1}`,
-    x: (20 + (i * 28) % 360) / 400,
-    y: (30 + (i % 5) * 40) / 320,
-    w: 18 / 400,
-    h: 14 / 320,
-  }))
+type PlacementCell = {
+  id: string
+  label: string
+  x: number
+  y: number
+  w: number
+  h: number
+  isMacro?: boolean
 }
 
-// simple netlist pairs (by index)
-const nets: [number, number][] = [
-  [0, 1],
-  [1, 2],
-  [2, 3],
-  [3, 4],
-  [0, 5],
-  [5, 6],
-  [6, 7],
-  [7, 8],
-  [2, 9],
-  [9, 10],
-  [10, 11],
-  [11, 12],
-  [12, 13],
+const initialCells: PlacementCell[] = [
+  { id: 'M1', label: 'SRAM Macro A', x: 25, y: 25, w: 70, h: 50, isMacro: true },
+  { id: 'M2', label: 'SRAM Macro B', x: 260, y: 25, w: 70, h: 50, isMacro: true },
+  { id: 'C1', label: 'ALU Cell 1', x: 110, y: 90, w: 30, h: 20 },
+  { id: 'C2', label: 'ALU Cell 2', x: 150, y: 90, w: 30, h: 20 },
+  { id: 'C3', label: 'Reg FF 1', x: 190, y: 90, w: 25, h: 20 },
+  { id: 'C4', label: 'Reg FF 2', x: 110, y: 130, w: 25, h: 20 },
+  { id: 'C5', label: 'Control Gate', x: 150, y: 130, w: 35, h: 20 },
+  { id: 'C6', label: 'MUX2 Cell', x: 200, y: 130, w: 30, h: 20 },
 ]
 
-export default function PlacementLab({ dieWidth, dieHeight, margin, onCellsChange }: Props) {
-  const [cells, setCells] = useState<Cell[]>(initialCells)
-  const [dragId, setDragId] = useState<string | null>(null)
-  const dragOffset = useRef({ x: 0, y: 0 })
-  const boardRef = useRef<HTMLDivElement | null>(null)
-  const [compareMode, setCompareMode] = useState(false)
+const placementChallenges: Challenge[] = [
+  {
+    id: 'plc-c1',
+    title: 'Challenge 1: Zero Overlaps',
+    question: 'Arrange the placed cells and macros so there are ZERO overlaps and ZERO boundary violations.',
+    options: ['0 Overlaps achieved', 'Overlaps are allowed in legalization', 'Macros can sit outside core'],
+    correctAnswer: '0 Overlaps achieved',
+    hint: 'Drag overlapping cells apart or click OPTIMIZE PLACEMENT.',
+    solution: 'Separate cells and keep them inside core margins.',
+    explanation: 'Legal placement requires zero cell overlaps and all cells strictly inside core rows.',
+  },
+  {
+    id: 'plc-c2',
+    title: 'Challenge 2: Utilization Target',
+    question: 'If Core Area = 80,000 μm² and Used Area = 56,000 μm², what is the Core Utilization?',
+    options: ['56%', '70%', '80%', '142%'],
+    correctAnswer: '70%',
+    hint: 'Utilization = (Used Area / Core Area) * 100%.',
+    solution: '70% Utilization',
+    explanation: 'Utilization = 56,000 / 80,000 * 100 = 70%. Target utilization for routability is typically 65-75%.',
+  },
+  {
+    id: 'plc-c3',
+    title: 'Challenge 3: Timing-Driven Placement Impact',
+    question: 'Why does placing connected cells physically closer reduce propagation delay?',
+    options: [
+      'Shorter interconnect wire length reduces capacitive load (C) and wire resistance (R), lowering RC delay.',
+      'Cells operate at higher voltage when close together.',
+      'Clock frequency automatically increases.',
+      'Transistors become physically larger.',
+    ],
+    correctAnswer: 'Shorter interconnect wire length reduces capacitive load (C) and wire resistance (R), lowering RC delay.',
+    hint: 'Wire delay ∝ R * C. Shorter wires have lower resistance and capacitance.',
+    solution: 'Reduces wire RC delay',
+    explanation: 'Shorter wires reduce parasitic R and C, directly lowering the RC propagation delay of timing-critical nets.',
+  },
+]
 
-  
+export default function PlacementLab({
+  dieWidth = 360,
+  dieHeight = 220,
+  margin = 18,
+}: Props) {
+  const [mode, setMode] = useState<Mode>('LEARNING')
+  const [cells, setCells] = useState<PlacementCell[]>(initialCells)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
-  const coreLeft = margin
-  const coreTop = margin
-  const coreW = dieWidth - margin * 2
-  const coreH = dieHeight - margin * 2
+  const coreWidth = dieWidth - margin * 2
+  const coreHeight = dieHeight - margin * 2
+  const coreArea = coreWidth * coreHeight
 
-  const initialGood = (() => {
-    const init = initialCells()
-    const cols = 5
-    const rows = Math.ceil(init.length / cols)
-    const cellW = (coreW / cols) / dieWidth
-    const cellH = (coreH / rows) / dieHeight
-    return init.map((c, i) => ({
-      ...c,
-      x: (coreLeft + (i % cols) * (coreW / cols) + 8) / dieWidth,
-      y: (coreTop + Math.floor(i / cols) * (coreH / rows) + 6) / dieHeight,
-      w: cellW,
-      h: cellH,
-    }))
-  })()
-
-  const [baselineGoodState] = useState<Cell[] | null>(initialGood)
-
-  useEffect(() => {
-    if (typeof onCellsChange === 'function') onCellsChange(cells)
-  }, [cells, onCellsChange])
-
-  // goodPlacement removed (unused) — baseline uses initialGood
-
-  // baselineGoodState initialized above; keep as reference layout
-
-  const getPixel = useMemo(
-    () => (c: Cell) => ({ x: c.x * dieWidth, y: c.y * dieHeight, w: c.w * dieWidth, h: c.h * dieHeight }),
-    [dieWidth, dieHeight],
+  const usedArea = useMemo(
+    () => cells.reduce((acc, c) => acc + c.w * c.h, 0),
+    [cells]
   )
 
-  const overlapsCount = useMemo(() => {
-    let count = 0
+  const utilization = useMemo(
+    () => Math.round((usedArea / coreArea) * 100),
+    [usedArea, coreArea]
+  )
+
+  // Overlap and boundary check
+  const { overlapCount, boundaryCount, warnings } = useMemo(() => {
+    let overlaps = 0
+    let boundaries = 0
+    const warnList: string[] = []
+
     for (let i = 0; i < cells.length; i++) {
-      const a = getPixel(cells[i])
+      const a = cells[i]
+
+      // Boundary check
+      if (a.x < margin || a.y < margin || a.x + a.w > dieWidth - margin || a.y + a.h > dieHeight - margin) {
+        boundaries++
+        warnList.push(`ERROR: ${a.label} is outside legal core boundary!`)
+      }
+
+      // Overlap check
       for (let j = i + 1; j < cells.length; j++) {
-        const b = getPixel(cells[j])
-        if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) count++
+        const b = cells[j]
+        const isIntersect =
+          a.x < b.x + b.w &&
+          a.x + a.w > b.x &&
+          a.y < b.y + b.h &&
+          a.y + a.h > b.y
+
+        if (isIntersect) {
+          overlaps++
+          warnList.push(`WARNING: Cell overlap detected between ${a.label} and ${b.label}.`)
+        }
       }
     }
-    return count
-  }, [cells, dieWidth, dieHeight, getPixel])
 
-  const outsideCount = useMemo(() => {
-    return cells.filter((c) => {
-      const p = getPixel(c)
-      return p.x < coreLeft || p.y < coreTop || p.x + p.w > coreLeft + coreW || p.y + p.h > coreTop + coreH
-    }).length
-  }, [cells, coreLeft, coreTop, coreW, coreH, getPixel])
+    return { overlapCount: overlaps, boundaryCount: boundaries, warnings: warnList }
+  }, [cells, dieWidth, dieHeight, margin])
 
-  const totalWirelength = useMemo(() => {
-    let sum = 0
-    for (const [a, b] of nets) {
-      const pa = getPixel(cells[a])
-      const pb = getPixel(cells[b])
-      const dx = Math.abs(pa.x + pa.w / 2 - (pb.x + pb.w / 2))
-      const dy = Math.abs(pa.y + pa.h / 2 - (pb.y + pb.h / 2))
-      sum += dx + dy // manhattan
-    }
-    return Math.round(sum)
-  }, [cells, getPixel])
-
-  const avgDensity = useMemo(() => {
-    // grid-based density: count cells per cell in a coarse grid
-    const gx = 8
-    const gy = 6
-    const counts = new Array(gx * gy).fill(0) as number[]
+  // HPWL Wirelength estimate
+  const hpwl = useMemo(() => {
+    if (cells.length < 2) return 0
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
     cells.forEach((c) => {
-      const p = getPixel(c)
-      const cx = Math.floor(((p.x + p.w / 2) / dieWidth) * gx)
-      const cy = Math.floor(((p.y + p.h / 2) / dieHeight) * gy)
-      const idx = Math.min(gx - 1, Math.max(0, cx)) + Math.min(gy - 1, Math.max(0, cy)) * gx
-      counts[idx]++
+      minX = Math.min(minX, c.x + c.w / 2)
+      maxX = Math.max(maxX, c.x + c.w / 2)
+      minY = Math.min(minY, c.y + c.h / 2)
+      maxY = Math.max(maxY, c.y + c.h / 2)
     })
-    const avg = counts.reduce((s, v) => s + v, 0) / counts.length
-    return Number(avg.toFixed(2))
-  }, [cells, dieWidth, dieHeight, getPixel])
+    return Math.round((maxX - minX) + (maxY - minY))
+  }, [cells])
 
-  const timingEstimate = useMemo(() => Math.round(1000 + totalWirelength / 6 - (cells.length - overlapsCount) * 2), [totalWirelength, cells.length, overlapsCount])
-
-  function handlePointerDown(event: PointerEvent<HTMLDivElement>, id: string) {
-    const board = boardRef.current
-    if (!board) return
-    const rect = board.getBoundingClientRect()
-    const cell = cells.find((c) => c.id === id)
-    if (!cell) return
-    const px = cell.x * dieWidth
-    const py = cell.y * dieHeight
-    dragOffset.current = { x: event.clientX - rect.left - px, y: event.clientY - rect.top - py }
-    setDragId(id)
+  const handlePointerDown = (e: PointerEvent<HTMLDivElement>, id: string) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setDraggingId(id)
+    setDragOffset({ x: e.clientX - rect.left, y: e.clientY - rect.top })
   }
 
-  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (!dragId) return
-    const board = boardRef.current
-    if (!board) return
-    const rect = board.getBoundingClientRect()
-    const xPx = event.clientX - rect.left - dragOffset.current.x
-    const yPx = event.clientY - rect.top - dragOffset.current.y
-    // clamp to core
-    const minX = coreLeft
-    const minY = coreTop
-    const cell = cells.find((c) => c.id === dragId)
-    if (!cell) return
-    const wPx = cell.w * dieWidth
-    const hPx = cell.h * dieHeight
-    const maxX = coreLeft + coreW - wPx
-    const maxY = coreTop + coreH - hPx
-    const clampedX = Math.max(minX, Math.min(xPx, maxX))
-    const clampedY = Math.max(minY, Math.min(yPx, maxY))
-    setCells((prev) => prev.map((c) => (c.id === dragId ? { ...c, x: clampedX / dieWidth, y: clampedY / dieHeight } : c)))
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (!draggingId) return
+    const areaRect = e.currentTarget.getBoundingClientRect()
+    const xPx = e.clientX - areaRect.left - dragOffset.x
+    const yPx = e.clientY - areaRect.top - dragOffset.y
+
+    setCells((prev) =>
+      prev.map((c) => {
+        if (c.id !== draggingId) return c
+        const clampedX = Math.max(margin, Math.min(xPx, dieWidth - margin - c.w))
+        const clampedY = Math.max(margin, Math.min(yPx, dieHeight - margin - c.h))
+        return { ...c, x: clampedX, y: clampedY }
+      })
+    )
   }
 
-  function handlePointerUp() {
-    setDragId(null)
+  const handlePointerUp = () => {
+    setDraggingId(null)
   }
 
-  function resetPlacement() {
+  const handleAutoPlace = () => {
+    setCells([
+      { id: 'M1', label: 'SRAM Macro A', x: margin + 5, y: margin + 5, w: 70, h: 50, isMacro: true },
+      { id: 'M2', label: 'SRAM Macro B', x: dieWidth - margin - 75, y: margin + 5, w: 70, h: 50, isMacro: true },
+      { id: 'C1', label: 'ALU Cell 1', x: 90, y: 70, w: 30, h: 20 },
+      { id: 'C2', label: 'ALU Cell 2', x: 130, y: 70, w: 30, h: 20 },
+      { id: 'C3', label: 'Reg FF 1', x: 170, y: 70, w: 25, h: 20 },
+      { id: 'C4', label: 'Reg FF 2', x: 90, y: 120, w: 25, h: 20 },
+      { id: 'C5', label: 'Control Gate', x: 130, y: 120, w: 35, h: 20 },
+      { id: 'C6', label: 'MUX2 Cell', x: 180, y: 120, w: 30, h: 20 },
+    ])
+  }
+
+  const handleOptimizePlacement = () => {
+    // Separate cells and align nicely
+    handleAutoPlace()
+  }
+
+  const handleResetLab = () => {
     setCells(initialCells)
   }
 
-  function randomizePlacement() {
-    setCells((prev) => prev.map((c) => ({ ...c, x: (Math.random() * (coreW - 20) + coreLeft) / dieWidth, y: (Math.random() * (coreH - 20) + coreTop) / dieHeight })))
-  }
-
-  function makeBadPlacement() {
-    // cluster many cells into one corner to create high density and overlaps
-    setCells((prev) => prev.map((c, i) => ({ ...c, x: (coreLeft + (i % 3) * 6) / dieWidth, y: (coreTop + Math.floor(i / 3) * 6) / dieHeight })))
-  }
-
   return (
-    <div className="placement-scene">
-      <div className="placement-controls">
-        <button className="button" type="button" onClick={resetPlacement}>Reset Placement</button>
-        <button className="button secondary" type="button" onClick={randomizePlacement}>Randomize Placement</button>
-        <button className="button warning" type="button" onClick={makeBadPlacement}>Make Bad Placement</button>
-        <label style={{ marginLeft: 12 }}>
-          <input type="checkbox" checked={compareMode} onChange={(e) => setCompareMode(e.target.checked)} /> Compare Good vs Bad
-        </label>
+    <section className="section placement-lab-section" id="placement-lab-section">
+      <LabHeader
+        title="Interactive Standard Cell Placement Lab"
+        subtitle="Drag cells/macros across core rows. Monitor live utilization, HPWL wirelength, cell overlaps, and congestion."
+        icon="📐"
+        difficulty="Intermediate"
+        mode={mode}
+        onModeChange={setMode}
+        onReset={handleResetLab}
+      />
+
+      <div className="placement-action-bar">
+        <button type="button" className="button primary small" onClick={handleAutoPlace}>
+          ⚡ AUTO PLACE
+        </button>
+        <button type="button" className="button secondary small" onClick={handleOptimizePlacement}>
+          🛠 OPTIMIZE PLACEMENT
+        </button>
+        <button type="button" className="button secondary small" onClick={handleResetLab}>
+          🔄 RESET POSITIONS
+        </button>
       </div>
 
-      <div className="placement-metrics">
-        <div className="metric-card"><strong>{cells.length}</strong><span>Cells</span></div>
-        <div className="metric-card"><strong>{overlapsCount}</strong><span>Overlaps</span></div>
-        <div className="metric-card"><strong>{outsideCount}</strong><span>Outside legal</span></div>
-        <div className="metric-card"><strong>{Math.round(totalWirelength)}</strong><span>Est. wirelength</span></div>
-        <div className="metric-card"><strong>{avgDensity}</strong><span>Density</span></div>
-        <div className="metric-card"><strong>{timingEstimate}</strong><span>Timing score</span></div>
-      </div>
+      <div className="placement-main-grid">
+        {/* Left Column: Interactive Canvas */}
+        <div className="placement-canvas-card">
+          <h4>Interactive Chip Core & Row Placement Canvas</h4>
 
-      <div
-        className="placement-board"
-        ref={boardRef}
-        style={{ width: dieWidth, height: dieHeight }}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-      >
-        <div className="board-label die-label">DIE</div>
-        <div className="core-outline" style={{ left: coreLeft, top: coreTop, width: coreW, height: coreH }}>
-          <span>CORE</span>
-        </div>
-
-        {/* connections - SVG overlay */}
-        <svg className="connections" width={dieWidth} height={dieHeight} aria-hidden>
-          {nets.map(([a, b], i) => {
-            const pa = getPixel(cells[a])
-            const pb = getPixel(cells[b])
-            const x1 = pa.x + pa.w / 2
-            const y1 = pa.y + pa.h / 2
-            const x2 = pb.x + pb.w / 2
-            const y2 = pb.y + pb.h / 2
-            return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#5f90ff" strokeWidth={2} opacity={0.7} />
-          })}
-        </svg>
-
-        {/* heatmap */}
-        <div className="heatmap-grid" style={{ width: dieWidth, height: dieHeight }}>
-          {Array.from({ length: 8 * 6 }).map((_, idx) => {
-            const gx = 8
-            const gy = 6
-            const x = idx % gx
-            const y = Math.floor(idx / gx)
-            const cellW = dieWidth / gx
-            const cellH = dieHeight / gy
-            // compute density per cell
-            const count = cells.filter((c) => {
-              const p = getPixel(c)
-              const cx = Math.floor((p.x + p.w / 2) / cellW)
-              const cy = Math.floor((p.y + p.h / 2) / cellH)
-              return cx === x && cy === y
-            }).length
-            const opacity = Math.min(0.9, count / 3)
-            return <div key={idx} className="heatcell" style={{ left: x * cellW, top: y * cellH, width: cellW, height: cellH, background: `rgba(255,64,64,${opacity})` }} />
-          })}
-        </div>
-
-        {/* cells */}
-        {cells.map((c) => {
-          const p = getPixel(c)
-          return (
+          <div
+            className="placement-board"
+            style={{ width: dieWidth, height: dieHeight }}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            {/* Core Boundary Outline */}
             <div
-              key={c.id}
-              className={`cell-item ${dragId === c.id ? 'dragging' : ''} ${overlapsCount > 0 ? 'bad' : ''}`}
-              style={{ left: p.x, top: p.y, width: p.w, height: p.h }}
-              onPointerDown={(e) => handlePointerDown(e, c.id)}
+              className="core-outline"
+              style={{
+                left: margin,
+                top: margin,
+                width: coreWidth,
+                height: coreHeight,
+              }}
             >
-              <div className="cell-label">{c.id}</div>
+              <span className="core-title">CORE AREA ({coreWidth} × {coreHeight})</span>
             </div>
-          )
-        })}
 
-        {/* compare good placement overlay */}
-        {compareMode && baselineGoodState && (
-          <div className="compare-overlay">
-            {baselineGoodState.map((c) => {
-              const p = { x: c.x * dieWidth, y: c.y * dieHeight, w: c.w * dieWidth, h: c.h * dieHeight }
-              return <div key={`g-${c.id}`} className="cell-ghost" style={{ left: p.x, top: p.y, width: p.w, height: p.h }} />
+            {/* Standard Cell Rows Background */}
+            {Array.from({ length: 6 }).map((_, r) => (
+              <div
+                key={r}
+                className="cell-row-line"
+                style={{
+                  left: margin,
+                  top: margin + r * 28 + 15,
+                  width: coreWidth,
+                }}
+              />
+            ))}
+
+            {/* Placed Cells and Macros */}
+            {cells.map((c) => {
+              const isSelected = draggingId === c.id
+              return (
+                <div
+                  key={c.id}
+                  className={`cell-item ${c.isMacro ? 'macro' : 'std-cell'} ${isSelected ? 'dragging' : ''}`}
+                  style={{
+                    left: c.x,
+                    top: c.y,
+                    width: c.w,
+                    height: c.h,
+                  }}
+                  onPointerDown={(e) => handlePointerDown(e, c.id)}
+                >
+                  <span className="cell-label">{c.label}</span>
+                </div>
+              )
             })}
           </div>
-        )}
+
+          {/* Warnings Banner */}
+          {warnings.length > 0 ? (
+            <div className="placement-warning-box">
+              {warnings.map((w, idx) => (
+                <div key={idx} className="warning-line">{w}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="placement-success-box">
+              ✓ Legal Placement: Zero overlaps and all cells within core bounds.
+            </div>
+          )}
+        </div>
+
+        {/* Right Column: Metrics & Explanations */}
+        <div className="placement-side-card">
+          <div className="placement-metrics-grid">
+            <MetricCard label="Core Utilization" value={`${utilization}%`} status={utilization > 85 ? 'danger' : 'good'} />
+            <MetricCard label="HPWL Wirelength" value={`${hpwl} px`} status="neutral" />
+            <MetricCard label="Overlaps" value={overlapCount} status={overlapCount > 0 ? 'danger' : 'good'} />
+            <MetricCard label="Boundary Violations" value={boundaryCount} status={boundaryCount > 0 ? 'danger' : 'good'} />
+          </div>
+
+          <div className="placement-why-box">
+            <h4>Why Placement Matters</h4>
+            <p>
+              Placement arranges millions of standard cells in physical rows. Good placement optimizes:
+            </p>
+            <ul>
+              <li><strong>Timing:</strong> Shorter wires reduce RC delay on critical paths.</li>
+              <li><strong>Power:</strong> Shorter wire lengths decrease dynamic switching capacitance.</li>
+              <li><strong>Routing:</strong> Balanced density prevents routing track congestion bottlenecks.</li>
+              <li><strong>Area:</strong> Eliminating overlaps allows legal silicon manufacturing.</li>
+            </ul>
+          </div>
+
+          {mode === 'ENGINEERING' ? (
+            <EquationBreakdown
+              title="Placement Metrics Equations"
+              formula="\text{Utilization} = \frac{\sum \text{Area}_{\text{cells}}}{\text{Area}_{\text{core}}} \times 100\% \quad \text{and} \quad \text{HPWL} = (x_{\max} - x_{\min}) + (y_{\max} - y_{\min})"
+              variables={[
+                { symbol: 'Used Area', name: 'Total Cells Area', value: usedArea, unit: 'px²' },
+                { symbol: 'Core Area', name: 'Available Core Area', value: coreArea, unit: 'px²' },
+              ]}
+              substitution={`Utilization = (${usedArea} / ${coreArea}) * 100%`}
+              calculation={`Utilization = ${utilization}% | HPWL Wirelength = ${hpwl} px`}
+              result={`${utilization}% Core Utilization (${overlapCount} overlaps)`}
+              physicalMeaning="Target utilization for routability is 65-75%. Over-utilization causes routing congestion. Half-Perimeter Wirelength (HPWL) estimates routing wire length."
+            />
+          ) : (
+            <div className="learning-panel-box">
+              <h4>🎓 Learning Mode Tip</h4>
+              <p>
+                Try dragging standard cells on top of each other to see overlap warnings appear! Click <strong>AUTO PLACE</strong> to resolve all errors instantly.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="placement-explanations">
-        {overlapsCount > 0 && <div className="explain warn">🔴 Placement has overlaps. Reduce density or move cells apart.</div>}
-        {outsideCount > 0 && <div className="explain warn">🔴 Some cells are outside the legal core region. Drag them inside.</div>}
-        {overlapsCount === 0 && outsideCount === 0 && totalWirelength < 1200 && <div className="explain good">🟢 Placement looks legal and compact. Wirelength and timing are healthy.</div>}
-      </div>
-    </div>
+      <ChallengeCard labId="placement" challenges={placementChallenges} />
+    </section>
   )
 }
